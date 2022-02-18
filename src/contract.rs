@@ -1,14 +1,15 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
-use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult};
+use cosmwasm_std::{to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult, Uint128, attr, CosmosMsg, BankMsg, Coin};
 use cw2::set_contract_version;
+use crate::ContractError::Unauthorized;
 
 use crate::error::ContractError;
-use crate::msg::{CountResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
-use crate::state::{State, STATE};
+use crate::msg::{ExecuteMsg, InstantiateMsg, OwnerResponse, QueryMsg};
+use crate::state::{BALANCES, State, STATE};
 
 // version info for migration info
-const CONTRACT_NAME: &str = "crates.io:{{project-name}}";
+const CONTRACT_NAME: &str = "crates.io:terra-deposit-withdraw";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -16,10 +17,9 @@ pub fn instantiate(
     deps: DepsMut,
     _env: Env,
     info: MessageInfo,
-    msg: InstantiateMsg,
+    _msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
     let state = State {
-        count: msg.count,
         owner: info.sender.clone(),
     };
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
@@ -27,52 +27,87 @@ pub fn instantiate(
 
     Ok(Response::new()
         .add_attribute("method", "instantiate")
-        .add_attribute("owner", info.sender)
-        .add_attribute("count", msg.count.to_string()))
+        .add_attribute("owner", info.sender))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute(
     deps: DepsMut,
-    _env: Env,
+    env: Env,
     info: MessageInfo,
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::Increment {} => try_increment(deps),
-        ExecuteMsg::Reset { count } => try_reset(deps, info, count),
+        ExecuteMsg::Deposit {} => deposit(deps, env, info),
+        ExecuteMsg::Withdraw { amount} => withdraw(deps, env, info, amount),
     }
 }
 
-pub fn try_increment(deps: DepsMut) -> Result<Response, ContractError> {
-    STATE.update(deps.storage, |mut state| -> Result<_, ContractError> {
-        state.count += 1;
-        Ok(state)
-    })?;
-
-    Ok(Response::new().add_attribute("method", "try_increment"))
-}
-pub fn try_reset(deps: DepsMut, info: MessageInfo, count: i32) -> Result<Response, ContractError> {
-    STATE.update(deps.storage, |mut state| -> Result<_, ContractError> {
-        if info.sender != state.owner {
-            return Err(ContractError::Unauthorized {});
+pub fn deposit(deps: DepsMut, _env: Env, info: MessageInfo) -> Result<Response, ContractError> {
+    if info.funds.len() == 1 {
+        let denom: String = info.funds[0].denom.clone();
+        let amount: Uint128 = info.funds[0].amount;
+        if denom == "uusd" && amount > Uint128::zero() {
+            BALANCES.update(
+                deps.storage,
+                deps.api.addr_canonicalize(&info.sender.to_string())?
+                    .as_slice(),
+                |balance| -> StdResult<_> {
+                    Ok(balance.unwrap_or_default().checked_add(amount)?)
+                }
+            )?;
+            Ok(Response::new().add_attributes(vec![
+                attr("action", "deposit"),
+                attr("from", info.sender),
+                attr("amount", amount),
+            ]))
         }
-        state.count = count;
-        Ok(state)
-    })?;
-    Ok(Response::new().add_attribute("method", "reset"))
+        else {
+            Err(Unauthorized {})
+        }
+    }
+    else {
+        Err(Unauthorized {})
+    }
+}
+
+pub fn withdraw(deps: DepsMut, _env: Env, info: MessageInfo, amount: Uint128) -> Result<Response, ContractError> {
+    if amount > Uint128::zero() {
+        BALANCES.update(
+            deps.storage,
+            deps.api.addr_canonicalize(&info.sender.to_string())?
+                .as_slice(),
+            |balance| -> StdResult<_> {
+                Ok(balance.unwrap_or_default().checked_sub(amount)?)
+            }
+        )?;
+    }
+    else {
+        return Err(Unauthorized {});
+    }
+    return Ok(Response::new().add_message(CosmosMsg::Bank(BankMsg::Send {
+        to_address: info.sender.to_string(),
+        amount: vec![Coin {
+            denom: "uusd".to_string(),
+            amount,
+        }]
+    })).add_attributes(vec![
+        attr("action", "withdraw"),
+        attr("to", info.sender),
+        attr("amount", amount),
+    ]));
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::GetCount {} => to_binary(&query_count(deps)?),
+        QueryMsg::GetOwner {} => to_binary(&query_owner(deps)?),
     }
 }
 
-fn query_count(deps: Deps) -> StdResult<CountResponse> {
+fn query_owner(deps: Deps) -> StdResult<OwnerResponse> {
     let state = STATE.load(deps.storage)?;
-    Ok(CountResponse { count: state.count })
+    Ok(OwnerResponse { owner: state.owner.to_string() })
 }
 
 #[cfg(test)]
