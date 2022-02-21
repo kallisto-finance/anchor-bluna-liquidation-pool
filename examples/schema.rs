@@ -3,7 +3,7 @@ use std::fs::create_dir_all;
 
 use cosmwasm_schema::{export_schema, remove_schemas, schema_for};
 
-use terra_deposit_withdraw::msg::{OwnerResponse, ExecuteMsg, InstantiateMsg, QueryMsg};
+use terra_deposit_withdraw::msg::{ExecuteMsg, InstantiateMsg, OwnerResponse, QueryMsg};
 use terra_deposit_withdraw::state::State;
 
 fn main() {
