@@ -88,7 +88,7 @@ pub fn withdraw(
     } else {
         return Err(Unauthorized {});
     }
-    return Ok(Response::new()
+    Ok(Response::new()
         .add_message(CosmosMsg::Bank(BankMsg::Send {
             to_address: info.sender.to_string(),
             amount: vec![Coin {
@@ -100,7 +100,7 @@ pub fn withdraw(
             attr("action", "withdraw"),
             attr("to", info.sender),
             attr("amount", amount),
-        ]));
+        ]))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
