@@ -120,13 +120,12 @@ fn query_owner(deps: Deps) -> StdResult<OwnerResponse> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cosmwasm_std::testing::{mock_dependencies_with_balance, mock_env, mock_info};
+    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
     use cosmwasm_std::{coins, from_binary};
 
     #[test]
     fn proper_initialization() {
-        let mut deps = mock_dependencies_with_balance(&coins(1000, "uusd"));
-
+        let mut deps = mock_dependencies(&[]);
         let msg = InstantiateMsg {};
         let info = mock_info("creator", &coins(1000, "uusd"));
 
@@ -142,8 +141,7 @@ mod tests {
 
     #[test]
     fn deposit_withdraw() {
-        let mut deps = mock_dependencies_with_balance(&coins(2, "uusd"));
-
+        let mut deps = mock_dependencies(&[]);
         let msg = InstantiateMsg {};
         let info = mock_info("creator", &coins(1000, "uusd"));
         let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
