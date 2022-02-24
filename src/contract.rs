@@ -8,7 +8,7 @@ use cosmwasm_std::{
 use cw2::set_contract_version;
 
 use crate::error::ContractError;
-use crate::msg::{ExecuteMsg, InstantiateMsg, OwnerResponse, QueryMsg};
+use crate::msg::{ExecuteMsg, InstantiateMsg, OwnerResponse, QueryMsg, WithdrawableResponse};
 use crate::state::{State, BALANCES, STATE};
 
 // version info for migration info
@@ -24,6 +24,8 @@ pub fn instantiate(
 ) -> Result<Response, ContractError> {
     let state = State {
         owner: info.sender.clone(),
+        cap: Uint128::zero(),
+        withdrawable: Uint128::zero(),
     };
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
     STATE.save(deps.storage, &state)?;
@@ -49,19 +51,27 @@ pub fn execute(
 pub fn deposit(deps: DepsMut, _env: Env, info: MessageInfo) -> Result<Response, ContractError> {
     if info.funds.len() == 1 {
         let denom: String = info.funds[0].denom.clone();
-        let amount: Uint128 = info.funds[0].amount;
-        if denom == "uusd" && amount > Uint128::zero() {
+        let mut share: Uint128 = info.funds[0].amount;
+        if denom == "uusd" && share > Uint128::zero() {
+            let mut state = STATE.load(deps.storage)?;
+            if state.withdrawable != Uint128::zero() {
+                share = share.checked_mul(state.withdrawable)?.checked_div(state.cap)?;
+            }
+            state.cap = state.cap.checked_add(info.funds[0].amount)?;
+            state.withdrawable = state.withdrawable.checked_add(share)?;
+            STATE.save(deps.storage, &state);
             BALANCES.update(
                 deps.storage,
                 deps.api
                     .addr_canonicalize(&info.sender.to_string())?
                     .as_slice(),
-                |balance| -> StdResult<_> { Ok(balance.unwrap_or_default().checked_add(amount)?) },
+                |balance| -> StdResult<_> { Ok(balance.unwrap_or_default().checked_add(share)?) },
             )?;
             Ok(Response::new().add_attributes(vec![
                 attr("action", "deposit"),
                 attr("from", info.sender),
-                attr("amount", amount),
+                attr("amount", info.funds[0].amount),
+                attr("share", share),
             ]))
         } else {
             Err(Unauthorized {})
@@ -75,18 +85,27 @@ pub fn withdraw(
     deps: DepsMut,
     _env: Env,
     info: MessageInfo,
-    amount: Uint128,
+    share: Uint128,
 ) -> Result<Response, ContractError> {
+    let mut amount= share;
     if amount > Uint128::zero() {
+        let mut state = STATE.load(deps.storage)?;
+        if state.cap == 0 {
+            Err(Unauthorized {})
+        }
+        amount = amount.checked_mul(state.cap)?.checked_div(state.withdrawable)?;
         BALANCES.update(
             deps.storage,
             deps.api
                 .addr_canonicalize(&info.sender.to_string())?
                 .as_slice(),
-            |balance| -> StdResult<_> { Ok(balance.unwrap_or_default().checked_sub(amount)?) },
+            |balance| -> StdResult<_> { Ok(balance.unwrap_or_default().checked_sub(share)?) },
         )?;
+        state.cap = state.cap.checked_sub(amount)?;
+        state.withdrawable = state.withdrawable.checked_sub(share)?;
+        STATE.save(deps.storage, &state);
     } else {
-        return Err(Unauthorized {});
+        Err(Unauthorized {})
     }
     Ok(Response::new()
         .add_message(CosmosMsg::Bank(BankMsg::Send {
@@ -99,6 +118,7 @@ pub fn withdraw(
         .add_attributes(vec![
             attr("action", "withdraw"),
             attr("to", info.sender),
+            attr("share", share),
             attr("amount", amount),
         ]))
 }
@@ -107,14 +127,18 @@ pub fn withdraw(
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::GetOwner {} => to_binary(&query_owner(deps)?),
+        QueryMsg::GetWithdrawable {} => to_binary(&query_withdrawable(deps)?),
     }
 }
 
 fn query_owner(deps: Deps) -> StdResult<OwnerResponse> {
     let state = STATE.load(deps.storage)?;
-    Ok(OwnerResponse {
-        owner: state.owner.to_string(),
-    })
+    Ok(OwnerResponse { owner: state.owner })
+}
+
+fn query_withdrawable(deps: Deps) -> StdResult<WithdrawableResponse> {
+    let state = STATE.load(deps.storage)?;
+    Ok(WithdrawableResponse { withdrawable: state.withdrawable })
 }
 
 #[cfg(test)]
