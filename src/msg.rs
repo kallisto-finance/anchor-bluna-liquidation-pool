@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InstantiateMsg {
-    // pub count: i32,
+    pub premium_slot: u8,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -12,6 +12,20 @@ pub struct InstantiateMsg {
 pub enum ExecuteMsg {
     Deposit {},
     Withdraw { amount: Uint128 },
+    Activate {},
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ExternalExecuteMsg {
+    ActivateBids {
+        collateral_token: String,
+        bids_idx: Option<Vec<Uint128>>,
+    },
+    SubmitBid {
+        collateral_token: String,
+        premium_slot: u8,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

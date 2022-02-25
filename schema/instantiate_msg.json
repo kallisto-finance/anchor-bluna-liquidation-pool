@@ -1,5 +1,15 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "InstantiateMsg",
-  "type": "object"
+  "type": "object",
+  "required": [
+    "premium_slot"
+  ],
+  "properties": {
+    "premium_slot": {
+      "type": "integer",
+      "format": "uint8",
+      "minimum": 0.0
+    }
+  }
 }

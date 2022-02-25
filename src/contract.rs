@@ -3,13 +3,13 @@ use crate::ContractError::Unauthorized;
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     attr, to_binary, BankMsg, Binary, Coin, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Response,
-    StdResult, Uint128,
+    StdResult, Uint128, WasmMsg,
 };
 use cw2::set_contract_version;
 
 use crate::error::ContractError;
-use crate::msg::{ExecuteMsg, InstantiateMsg, OwnerResponse, QueryMsg};
-use crate::state::{State, BALANCES, STATE};
+use crate::msg::{ExecuteMsg, ExternalExecuteMsg, InstantiateMsg, OwnerResponse, QueryMsg};
+use crate::state::{State, ANCHOR_LIQUIDATION_QUEUE_ADDR, BALANCES, B_LUNA_ADDR, STATE};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:terra-deposit-withdraw";
@@ -20,10 +20,11 @@ pub fn instantiate(
     deps: DepsMut,
     _env: Env,
     info: MessageInfo,
-    _msg: InstantiateMsg,
+    msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
     let state = State {
         owner: info.sender.clone(),
+        premium_slot: msg.premium_slot,
     };
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
     STATE.save(deps.storage, &state)?;
@@ -36,17 +37,18 @@ pub fn instantiate(
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn execute(
     deps: DepsMut,
-    env: Env,
+    _env: Env,
     info: MessageInfo,
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
-        ExecuteMsg::Deposit {} => deposit(deps, env, info),
-        ExecuteMsg::Withdraw { amount } => withdraw(deps, env, info, amount),
+        ExecuteMsg::Deposit {} => deposit(deps, info),
+        ExecuteMsg::Withdraw { amount } => withdraw(deps, info, amount),
+        ExecuteMsg::Activate {} => activate(info),
     }
 }
 
-pub fn deposit(deps: DepsMut, _env: Env, info: MessageInfo) -> Result<Response, ContractError> {
+fn deposit(deps: DepsMut, info: MessageInfo) -> Result<Response, ContractError> {
     if info.funds.len() == 1 {
         let denom: String = info.funds[0].denom.clone();
         let amount: Uint128 = info.funds[0].amount;
@@ -58,11 +60,15 @@ pub fn deposit(deps: DepsMut, _env: Env, info: MessageInfo) -> Result<Response, 
                     .as_slice(),
                 |balance| -> StdResult<_> { Ok(balance.unwrap_or_default().checked_add(amount)?) },
             )?;
-            Ok(Response::new().add_attributes(vec![
-                attr("action", "deposit"),
-                attr("from", info.sender),
-                attr("amount", amount),
-            ]))
+            let state: State = STATE.load(deps.storage)?;
+            let message: CosmosMsg = submit_bid(amount, state.premium_slot)?;
+            Ok(Response::new()
+                .add_attributes(vec![
+                    attr("action", "deposit"),
+                    attr("from", info.sender),
+                    attr("amount", amount),
+                ])
+                .add_message(message))
         } else {
             Err(Unauthorized {})
         }
@@ -71,12 +77,35 @@ pub fn deposit(deps: DepsMut, _env: Env, info: MessageInfo) -> Result<Response, 
     }
 }
 
-pub fn withdraw(
-    deps: DepsMut,
-    _env: Env,
-    info: MessageInfo,
-    amount: Uint128,
-) -> Result<Response, ContractError> {
+fn submit_bid(amount: Uint128, premium_slot: u8) -> Result<CosmosMsg, ContractError> {
+    Ok(CosmosMsg::Wasm(WasmMsg::Execute {
+        contract_addr: ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
+        funds: vec![Coin::new(amount.u128(), "uusd")],
+        msg: to_binary(&ExternalExecuteMsg::SubmitBid {
+            collateral_token: B_LUNA_ADDR.to_string(),
+            premium_slot,
+        })?,
+    }))
+}
+
+pub fn activate(info: MessageInfo) -> Result<Response, ContractError> {
+    Ok(Response::new()
+        .add_attributes(vec![attr("action", "activate"), attr("from", info.sender)])
+        .add_message(activate_all_bids()?))
+}
+
+fn activate_all_bids() -> Result<CosmosMsg, ContractError> {
+    Ok(CosmosMsg::Wasm(WasmMsg::Execute {
+        contract_addr: ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
+        funds: vec![],
+        msg: to_binary(&ExternalExecuteMsg::ActivateBids {
+            collateral_token: B_LUNA_ADDR.to_string(),
+            bids_idx: None,
+        })?,
+    }))
+}
+
+fn withdraw(deps: DepsMut, info: MessageInfo, amount: Uint128) -> Result<Response, ContractError> {
     if amount > Uint128::zero() {
         BALANCES.update(
             deps.storage,
@@ -126,7 +155,7 @@ mod tests {
     #[test]
     fn proper_initialization() {
         let mut deps = mock_dependencies(&[]);
-        let msg = InstantiateMsg {};
+        let msg = InstantiateMsg { premium_slot: 1 };
         let info = mock_info("creator", &coins(1000, "uusd"));
 
         // we can just call .unwrap() to assert this was a success
@@ -142,7 +171,7 @@ mod tests {
     #[test]
     fn deposit_withdraw() {
         let mut deps = mock_dependencies(&[]);
-        let msg = InstantiateMsg {};
+        let msg = InstantiateMsg { premium_slot: 1 };
         let info = mock_info("creator", &coins(1000, "uusd"));
         let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
 

@@ -3,11 +3,17 @@
   "title": "State",
   "type": "object",
   "required": [
-    "owner"
+    "owner",
+    "premium_slot"
   ],
   "properties": {
     "owner": {
       "$ref": "#/definitions/Addr"
+    },
+    "premium_slot": {
+      "type": "integer",
+      "format": "uint8",
+      "minimum": 0.0
     }
   },
   "definitions": {
