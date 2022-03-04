@@ -53,29 +53,43 @@ pub fn execute(
     msg: ExecuteMsg,
 ) -> Result<Response, ContractError> {
     match msg {
+        // Deposit UST to vault
         ExecuteMsg::Deposit {} => deposit(deps, env, info),
+        // Withdraw UST from vault
         ExecuteMsg::Withdraw { share } => withdraw(deps, env, info, share),
+        // Activate all bids
         ExecuteMsg::Activate {} => activate(info),
+        // Withdraw bLuna from vault
         ExecuteMsg::Claim { share } => claim(deps, env, info, share),
+        // Submit bid with amount and premium slot from service
+        // Only owner can execute
         ExecuteMsg::Submit {
             amount,
             premium_slot,
         } => submit(deps, env, info, amount, premium_slot),
+        // Withdraw all liquidated bLuna from Anchor
         ExecuteMsg::Liquidate {} => liquidate(info),
+        // Transfer ownership to the other address
+        // Owner will be service account address
+        // Only owner can execute
         ExecuteMsg::TransferOwnership { new_owner } => transfer_ownership(deps, info, new_owner),
     }
 }
 
 fn deposit(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, ContractError> {
+    // Only one coin
     if info.funds.len() == 1 {
         let denom = info.funds[0].denom.clone();
         let mut share = info.funds[0].amount;
+        // Only UST and non-zero amount
         if denom == "uusd" && share > Uint128::zero() {
             let mut state = STATE.load(deps.storage)?;
+            // UST in vault
             let mut usd_balance = deps
                 .querier
                 .query_balance(&env.contract.address, "uusd")?
                 .amount;
+            // bLuna in vault
             let b_luna_balance_response: Cw20BalanceResponse = deps.querier.query_wasm_smart(
                 B_LUNA_ADDR,
                 &ExternalQueryMsg::Balance {
@@ -84,6 +98,7 @@ fn deposit(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, Contr
             )?;
             let mut b_luna_balance = b_luna_balance_response.balance;
             let mut start_after: Option<Uint128> = Some(Uint128::zero());
+            // Iterate all valid bids
             loop {
                 let res: BidsResponse = deps.querier.query_wasm_smart(
                     ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
@@ -95,7 +110,9 @@ fn deposit(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, Contr
                     },
                 )?;
                 for item in &res.bids {
+                    // Waiting UST for liquidation
                     usd_balance += Uint128::try_from(item.amount)?;
+                    // Pending bLuna in Anchor
                     b_luna_balance += Uint128::try_from(item.pending_liquidated_collateral)?;
                 }
                 if res.bids.len() < 31 {
@@ -103,6 +120,7 @@ fn deposit(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, Contr
                 }
                 start_after = Some(res.bids.last().unwrap().idx);
             }
+            // Fetch bLuna price from oracle
             let price_response: PriceResponse = deps.querier.query_wasm_smart(
                 PRICE_ORACLE_ADDR.to_string(),
                 &ExternalQueryMsg::Price {
@@ -244,9 +262,12 @@ fn withdraw(
             },
         )?;
         let price = price_response.rate;
+        // Calculate total cap
         let total_cap = Uint128::try_from(Uint256::from(b_luna_balance).mul(price))? + usd_balance;
         let state = STATE.load(deps.storage)?;
+        // Calculate exact amount from share and total cap
         let withdraw_cap = total_cap * share / state.total_supply;
+        // Withdraw if UST in vault is enough
         if uusd_balance >= withdraw_cap {
             Ok(Response::new()
                 .add_message(CosmosMsg::Bank(BankMsg::Send {
@@ -263,6 +284,7 @@ fn withdraw(
                     attr("amount", withdraw_cap),
                 ]))
         } else {
+            // Retract bids for insufficient UST in vault
             let mut messages = vec![];
             usd_balance = withdraw_cap - uusd_balance;
             start_after = Some(Uint128::zero());
@@ -381,9 +403,11 @@ fn claim(
             },
         )?;
         let price = price_response.rate;
+        // Total cap in bLuna price
         let total_cap = b_luna_balance_response.balance
             + Uint128::try_from(Uint256::from(usd_balance).mul(price.inv().unwrap()))?;
         let state = STATE.load(deps.storage)?;
+        // Calculate bLuna amount from share
         let withdraw_cap = total_cap * share / state.total_supply;
         if b_luna_balance_response.balance >= withdraw_cap {
             Ok(Response::new()
@@ -402,6 +426,7 @@ fn claim(
                     attr("amount", withdraw_cap),
                 ]))
         } else {
+            // Withdraw all pending bLuna if bLuna in vault is insufficient
             Ok(Response::new()
                 .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
@@ -465,10 +490,15 @@ pub fn transfer_ownership(
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
+        // Get owner address and total supply
         QueryMsg::GetInfo {} => to_binary(&query_info(deps)?),
+        // Get share from address
         QueryMsg::Balance { address } => to_binary(&query_balance(deps, address)?),
+        // Get total cap in vault and anchor
         QueryMsg::TotalCap {} => to_binary(&query_total_cap(deps, env)?),
+        // Return true if activate is needed
         QueryMsg::Activatable {} => to_binary(&query_activatable(deps, env)?),
+        // Return true if liquidate is needed
         QueryMsg::Liquidatable {} => to_binary(&query_liquidatable(deps, env)?),
     }
 }
