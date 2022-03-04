@@ -3,7 +3,10 @@ use std::fs::create_dir_all;
 
 use cosmwasm_schema::{export_schema, remove_schemas, schema_for};
 
-use terra_deposit_withdraw::msg::{ExecuteMsg, InstantiateMsg, OwnerResponse, QueryMsg};
+use terra_deposit_withdraw::msg::{
+    ActivatableResponse, BalanceResponse, ExecuteMsg, InfoResponse, InstantiateMsg,
+    LiquidatableResponse, QueryMsg, TotalCapResponse,
+};
 use terra_deposit_withdraw::state::State;
 
 fn main() {
@@ -16,5 +19,9 @@ fn main() {
     export_schema(&schema_for!(ExecuteMsg), &out_dir);
     export_schema(&schema_for!(QueryMsg), &out_dir);
     export_schema(&schema_for!(State), &out_dir);
-    export_schema(&schema_for!(OwnerResponse), &out_dir);
+    export_schema(&schema_for!(InfoResponse), &out_dir);
+    export_schema(&schema_for!(BalanceResponse), &out_dir);
+    export_schema(&schema_for!(TotalCapResponse), &out_dir);
+    export_schema(&schema_for!(ActivatableResponse), &out_dir);
+    export_schema(&schema_for!(LiquidatableResponse), &out_dir);
 }

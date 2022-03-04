@@ -14,8 +14,9 @@ pub enum ExecuteMsg {
     Withdraw { share: Uint128 },
     Claim { share: Uint128 },
     Activate {},
-    Submit { premium_slot: u8 },
+    Submit { amount: Uint128, premium_slot: u8 },
     Liquidate {},
+    TransferOwnership { new_owner: Addr },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -50,6 +51,8 @@ pub enum QueryMsg {
     GetInfo {},
     Balance { address: String },
     TotalCap {},
+    Activatable {},
+    Liquidatable {},
 }
 
 // We define a custom struct for each query response
@@ -67,6 +70,16 @@ pub struct BalanceResponse {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct TotalCapResponse {
     pub total_cap: Uint128,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct ActivatableResponse {
+    pub activatable: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct LiquidatableResponse {
+    pub liquidatable: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

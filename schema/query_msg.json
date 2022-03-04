@@ -5,10 +5,66 @@
     {
       "type": "object",
       "required": [
-        "get_owner"
+        "get_info"
       ],
       "properties": {
-        "get_owner": {
+        "get_info": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "balance"
+      ],
+      "properties": {
+        "balance": {
+          "type": "object",
+          "required": [
+            "address"
+          ],
+          "properties": {
+            "address": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "total_cap"
+      ],
+      "properties": {
+        "total_cap": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "activatable"
+      ],
+      "properties": {
+        "activatable": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "liquidatable"
+      ],
+      "properties": {
+        "liquidatable": {
           "type": "object"
         }
       },

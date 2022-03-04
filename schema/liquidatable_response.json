@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LiquidatableResponse",
+  "type": "object",
+  "required": [
+    "liquidatable"
+  ],
+  "properties": {
+    "liquidatable": {
+      "type": "boolean"
+    }
+  }
+}

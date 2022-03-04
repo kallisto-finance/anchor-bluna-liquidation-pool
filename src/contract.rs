@@ -1,11 +1,12 @@
 use crate::ContractError::{
     CoinCountError, CoinError, InsufficientBalance, InsufficientUSD, Invalidate, Unauthorized,
 };
+
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
-    attr, to_binary, BankMsg, Binary, Coin, CosmosMsg, Deps, DepsMut, Env, Fraction, MessageInfo,
-    Response, StdResult, Uint128, Uint256, WasmMsg,
+    attr, to_binary, Addr, BankMsg, Binary, Coin, CosmosMsg, Deps, DepsMut, Env, Fraction,
+    MessageInfo, Response, StdResult, Uint128, Uint256, WasmMsg,
 };
 use cw2::set_contract_version;
 use std::convert::TryFrom;
@@ -13,8 +14,9 @@ use std::ops::Mul;
 
 use crate::error::ContractError;
 use crate::msg::{
-    BalanceResponse, BidsResponse, Cw20BalanceResponse, ExecuteMsg, ExternalExecuteMsg,
-    ExternalQueryMsg, InfoResponse, InstantiateMsg, PriceResponse, QueryMsg, TotalCapResponse,
+    ActivatableResponse, BalanceResponse, BidsResponse, Cw20BalanceResponse, ExecuteMsg,
+    ExternalExecuteMsg, ExternalQueryMsg, InfoResponse, InstantiateMsg, LiquidatableResponse,
+    PriceResponse, QueryMsg, TotalCapResponse,
 };
 use crate::state::{
     State, ANCHOR_LIQUIDATION_QUEUE_ADDR, BALANCES, B_LUNA_ADDR, PRICE_ORACLE_ADDR, STATE,
@@ -28,11 +30,11 @@ const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn instantiate(
     deps: DepsMut,
     _env: Env,
-    info: MessageInfo,
+    _info: MessageInfo,
     msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
     let state = State {
-        owner: msg.owner,
+        owner: msg.owner.clone(),
         total_supply: Uint128::zero(),
     };
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
@@ -40,7 +42,7 @@ pub fn instantiate(
 
     Ok(Response::new()
         .add_attribute("method", "instantiate")
-        .add_attribute("owner", info.sender))
+        .add_attribute("owner", msg.owner))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -55,8 +57,12 @@ pub fn execute(
         ExecuteMsg::Withdraw { share } => withdraw(deps, env, info, share),
         ExecuteMsg::Activate {} => activate(info),
         ExecuteMsg::Claim { share } => claim(deps, env, info, share),
-        ExecuteMsg::Submit { premium_slot } => submit(deps, env, info, premium_slot),
+        ExecuteMsg::Submit {
+            amount,
+            premium_slot,
+        } => submit(deps, env, info, amount, premium_slot),
         ExecuteMsg::Liquidate {} => liquidate(info),
+        ExecuteMsg::TransferOwnership { new_owner } => transfer_ownership(deps, info, new_owner),
     }
 }
 
@@ -139,6 +145,7 @@ fn submit(
     deps: DepsMut,
     env: Env,
     info: MessageInfo,
+    amount: Uint128,
     premium_slot: u8,
 ) -> Result<Response, ContractError> {
     let state = STATE.load(deps.storage)?;
@@ -149,17 +156,17 @@ fn submit(
         .querier
         .query_balance(env.contract.address, "uusd")?
         .amount;
-    if !usd_balance.is_zero() {
+    if !usd_balance.is_zero() && usd_balance >= amount {
         Ok(Response::new()
             .add_attributes(vec![
                 attr("action", "submit"),
                 attr("from", info.sender),
-                attr("amount", usd_balance),
+                attr("amount", amount),
                 attr("premium_slot", premium_slot.to_string()),
             ])
             .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
                 contract_addr: ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
-                funds: vec![Coin::new(usd_balance.u128(), "uusd")],
+                funds: vec![Coin::new(amount.u128(), "uusd")],
                 msg: to_binary(&ExternalExecuteMsg::SubmitBid {
                     collateral_token: B_LUNA_ADDR.to_string(),
                     premium_slot,
@@ -437,12 +444,32 @@ fn liquidate(info: MessageInfo) -> Result<Response, ContractError> {
         .add_attributes(vec![attr("action", "liquidate"), attr("from", info.sender)]))
 }
 
+pub fn transfer_ownership(
+    deps: DepsMut,
+    info: MessageInfo,
+    new_owner: Addr,
+) -> Result<Response, ContractError> {
+    let mut state = STATE.load(deps.storage)?;
+    if state.owner != info.sender {
+        return Err(Unauthorized {});
+    }
+    state.owner = new_owner.clone();
+
+    Ok(Response::new().add_attributes(vec![
+        attr("action", "transfer_ownership"),
+        attr("from", info.sender),
+        attr("to", new_owner.to_string()),
+    ]))
+}
+
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::GetInfo {} => to_binary(&query_info(deps)?),
         QueryMsg::Balance { address } => to_binary(&query_balance(deps, address)?),
         QueryMsg::TotalCap {} => to_binary(&query_total_cap(deps, env)?),
+        QueryMsg::Activatable {} => to_binary(&query_activatable(deps, env)?),
+        QueryMsg::Liquidatable {} => to_binary(&query_liquidatable(deps, env)?),
     }
 }
 
@@ -502,22 +529,73 @@ fn query_total_cap(deps: Deps, env: Env) -> StdResult<TotalCapResponse> {
         },
     )?;
     let price = price_response.rate;
-    let total_cap = b_luna_balance_response.balance
-        + Uint128::try_from(Uint256::from(usd_balance).mul(price.inv().unwrap()))?;
+    let total_cap = Uint128::try_from(Uint256::from(b_luna_balance).mul(price))? + usd_balance;
     Ok(TotalCapResponse { total_cap })
+}
+
+fn query_activatable(deps: Deps, env: Env) -> StdResult<ActivatableResponse> {
+    let mut start_after: Option<Uint128> = Some(Uint128::zero());
+    loop {
+        let res: BidsResponse = deps.querier.query_wasm_smart(
+            ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
+            &ExternalQueryMsg::BidsByUser {
+                collateral_token: B_LUNA_ADDR.to_string(),
+                bidder: env.contract.address.to_string(),
+                start_after,
+                limit: Some(31),
+            },
+        )?;
+        for item in &res.bids {
+            if item.wait_end.is_some() && item.wait_end.unwrap() < env.block.time.seconds() {
+                return Ok(ActivatableResponse { activatable: true });
+            }
+        }
+        if res.bids.len() < 31 {
+            break;
+        }
+        start_after = Some(res.bids.last().unwrap().idx);
+    }
+    Ok(ActivatableResponse { activatable: false })
+}
+
+fn query_liquidatable(deps: Deps, env: Env) -> StdResult<LiquidatableResponse> {
+    let mut start_after: Option<Uint128> = Some(Uint128::zero());
+    loop {
+        let res: BidsResponse = deps.querier.query_wasm_smart(
+            ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
+            &ExternalQueryMsg::BidsByUser {
+                collateral_token: B_LUNA_ADDR.to_string(),
+                bidder: env.contract.address.to_string(),
+                start_after,
+                limit: Some(31),
+            },
+        )?;
+        for item in &res.bids {
+            if !item.pending_liquidated_collateral.is_zero() {
+                return Ok(LiquidatableResponse { liquidatable: true });
+            }
+        }
+        if res.bids.len() < 31 {
+            break;
+        }
+        start_after = Some(res.bids.last().unwrap().idx);
+    }
+    Ok(LiquidatableResponse {
+        liquidatable: false,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cosmwasm_std::{coins, from_binary};
+    use cosmwasm_std::{coins, from_binary, Addr};
 
     #[test]
     fn proper_initialization() {
         let mut deps = mock_dependencies(&[]);
         let msg = InstantiateMsg {
-            owner: "owner".to_string().into(),
+            owner: Addr::unchecked("owner"),
         };
         let info = mock_info("creator", &coins(1000, "uusd"));
 
@@ -526,33 +604,8 @@ mod tests {
         assert_eq!(0, res.messages.len());
 
         // it worked, let's query the state
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetOwner {}).unwrap();
-        let value: OwnerResponse = from_binary(&res).unwrap();
-        assert_eq!("creator", value.owner);
-    }
-
-    #[test]
-    fn deposit_withdraw() {
-        let mut deps = mock_dependencies(&[]);
-        let msg = InstantiateMsg {
-            owner: "owner".to_string().into(),
-        };
-        let info = mock_info("creator", &coins(1000, "uusd"));
-        let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
-
-        // beneficiary can release it
-        let info = mock_info("anyone", &coins(100, "uusd"));
-        let msg = ExecuteMsg::Deposit {};
-        let _res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
-
-        let info = mock_info("anyone", &[]);
-        let msg = ExecuteMsg::Withdraw {
-            share: Uint128::new(10),
-        };
-        let _res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
-
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetOwner {}).unwrap();
-        let value: OwnerResponse = from_binary(&res).unwrap();
-        assert_eq!("creator", value.owner);
+        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetInfo {}).unwrap();
+        let value: InfoResponse = from_binary(&res).unwrap();
+        assert_eq!("owner", value.owner);
     }
 }
