@@ -2,46 +2,46 @@
 
 This is a vault smart contract to help with Anchor liquidation bids.
 
-Users can deposit with UST and get share of the vault.
+Users can deposit with UST to get a share of the vault.
 
-And withdraw (in UST) or claim (in bLuna) as much as their share of the vault.
+And withdraw (in UST or bLuna) as much as their asset share of the vault.
 
-The owner can execute submit with premium slot and amount in the vault to Anchor liquidation queue.
+The owner can submit bids with specified premium slot and amount from the vault to Anchor liquidation queue.
 
-And the owner can activate submitted bids and execute liquidate to withdraw pending bLuna from Anchor to the vault.
+And the owner can activate submitted bids and claim pending bLuna from Anchor to the vault.
 
 The owner can transfer ownership to another address.
 
-Submit and transfer ownership is unique feature that only owner can execute.
+Submitting bids and transfer ownership is unique feature that only owner can execute.
 
 ## ExecuteMsg
 
-### Deposit*
+### UserDeposit*
 
-Deposit UST to vault.
+User deposit UST to vault.
 
 | Key | Type | Description |
 |-----|------|-------------|
 | -   | -    | -           |
 
-### Withdraw
+### UserWithdrawUST
 
-Withdraw UST from vault.
+User withdraws UST from vault.
 
 | Key   | Type    | Description                  |
 |-------|---------|------------------------------|
 | share | Uint128 | Share amount to withdraw UST |
 
 
-### Claim
+### UserWithdrawBLuna
 
-Withdraw bLuna from vault.
+User withdraws bLuna from vault.
 
 | Key   | Type    | Description                    |
 |-------|---------|--------------------------------|
 | share | Uint128 | Share amount to withdraw bLuna |
 
-### Activate
+### ActivateBid
 
 Activate all bids.
 
@@ -49,7 +49,7 @@ Activate all bids.
 |-----|------|-------------|
 | -   | -    | -           |
 
-### Submit**
+### SubmitBid**
 
 Submit bid with amount and premium slot from service.
 
@@ -58,7 +58,7 @@ Submit bid with amount and premium slot from service.
 | amount       | Uint128 | UST amount to submit bid |
 | premium_slot | u8      | Premium Slot (%)         |
 
-### Liquidate
+### ClaimLiquidation
 
 Withdraw all liquidated bLuna from Anchor Liquidation Queue.
 
@@ -91,7 +91,7 @@ Get owner address and total supply.
 | owner        | String  | Owner address                    |
 | total_supply | Uint128 | Total supply amount of the vault |
 
-### Balance
+### GetBalance
 
 Get share of vault from address.
 
@@ -134,15 +134,15 @@ Check if there are bids to activate.
 | activatable | bool | True if activate is available |
 
 
-### Liquidatable
+### Claimable
 
-Check if there are pending liquidated collateral.
+Check if there is pending liquidated collateral.
 
 | Key | Type | Description |
 |-----|------|-------------|
 | -   | -    | -           |
 
-### LiquidatableResponse
+### ClaimableResponse
 
 | Key          | Type | Description                    |
 |--------------|------|--------------------------------|
