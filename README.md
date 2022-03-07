@@ -16,7 +16,7 @@ Submitting bids and transfer ownership is unique feature that only owner can exe
 
 ## ExecuteMsg
 
-### UserDeposit*
+### Deposit*
 
 User deposit UST to vault.
 
@@ -24,7 +24,7 @@ User deposit UST to vault.
 |-----|------|-------------|
 | -   | -    | -           |
 
-### UserWithdrawUST
+### WithdrawUst
 
 User withdraws UST from vault.
 
@@ -33,7 +33,7 @@ User withdraws UST from vault.
 | share | Uint128 | Share amount to withdraw UST |
 
 
-### UserWithdrawBLuna
+### WithdrawBLuna
 
 User withdraws bLuna from vault.
 
@@ -91,7 +91,7 @@ Get owner address and total supply.
 | owner        | String  | Owner address                    |
 | total_supply | Uint128 | Total supply amount of the vault |
 
-### GetBalance
+### Balance
 
 Get share of vault from address.
 
@@ -144,9 +144,9 @@ Check if there is pending liquidated collateral.
 
 ### ClaimableResponse
 
-| Key          | Type | Description                    |
-|--------------|------|--------------------------------|
-| liquidatable | bool | True if liquidate is available |
+| Key       | Type | Description                    |
+|-----------|------|--------------------------------|
+| claimable | bool | True if liquidate is available |
 
 *: Requires UST to be sent beforehand.
 
