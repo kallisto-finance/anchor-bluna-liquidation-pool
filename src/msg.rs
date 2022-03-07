@@ -11,11 +11,11 @@ pub struct InstantiateMsg {
 #[serde(rename_all = "snake_case")]
 pub enum ExecuteMsg {
     Deposit {},
-    Withdraw { share: Uint128 },
-    Claim { share: Uint128 },
-    Activate {},
-    Submit { amount: Uint128, premium_slot: u8 },
-    Liquidate {},
+    WithdrawUst { share: Uint128 },
+    WithdrawBLuna { share: Uint128 },
+    ActivateBid {},
+    SubmitBid { amount: Uint128, premium_slot: u8 },
+    ClaimLiquidation {},
     TransferOwnership { new_owner: Addr },
 }
 
@@ -52,7 +52,7 @@ pub enum QueryMsg {
     Balance { address: String },
     TotalCap {},
     Activatable {},
-    Liquidatable {},
+    Claimable {},
 }
 
 // We define a custom struct for each query response
@@ -78,8 +78,8 @@ pub struct ActivatableResponse {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct LiquidatableResponse {
-    pub liquidatable: bool,
+pub struct ClaimableResponse {
+    pub claimable: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

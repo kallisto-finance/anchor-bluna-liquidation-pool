@@ -22,7 +22,7 @@ pub enum ContractError {
     CoinCountError {},
 
     #[error("Insufficient USD")]
-    InsufficientUSD {},
+    InsufficientUsd {},
 
     #[error("Insufficient Balance")]
     InsufficientBalance {},

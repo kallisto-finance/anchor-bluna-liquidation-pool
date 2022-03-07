@@ -1,5 +1,5 @@
 use crate::ContractError::{
-    CoinCountError, CoinError, InsufficientBalance, InsufficientUSD, Invalidate, Unauthorized,
+    CoinCountError, CoinError, InsufficientBalance, InsufficientUsd, Invalidate, Unauthorized,
 };
 
 #[cfg(not(feature = "library"))]
@@ -14,9 +14,9 @@ use std::ops::Mul;
 
 use crate::error::ContractError;
 use crate::msg::{
-    ActivatableResponse, BalanceResponse, BidsResponse, Cw20BalanceResponse, ExecuteMsg,
-    ExternalExecuteMsg, ExternalQueryMsg, InfoResponse, InstantiateMsg, LiquidatableResponse,
-    PriceResponse, QueryMsg, TotalCapResponse,
+    ActivatableResponse, BalanceResponse, BidsResponse, ClaimableResponse, Cw20BalanceResponse,
+    ExecuteMsg, ExternalExecuteMsg, ExternalQueryMsg, InfoResponse, InstantiateMsg, PriceResponse,
+    QueryMsg, TotalCapResponse,
 };
 use crate::state::{
     State, ANCHOR_LIQUIDATION_QUEUE_ADDR, BALANCES, B_LUNA_ADDR, PRICE_ORACLE_ADDR, STATE,
@@ -56,19 +56,19 @@ pub fn execute(
         // Deposit UST to vault
         ExecuteMsg::Deposit {} => deposit(deps, env, info),
         // Withdraw UST from vault
-        ExecuteMsg::Withdraw { share } => withdraw(deps, env, info, share),
+        ExecuteMsg::WithdrawUst { share } => withdraw_ust(deps, env, info, share),
         // Activate all bids
-        ExecuteMsg::Activate {} => activate(info),
+        ExecuteMsg::ActivateBid {} => activate_bid(info),
         // Withdraw bLuna from vault
-        ExecuteMsg::Claim { share } => claim(deps, env, info, share),
+        ExecuteMsg::WithdrawBLuna { share } => withdraw_b_luna(deps, env, info, share),
         // Submit bid with amount and premium slot from service
         // Only owner can execute
-        ExecuteMsg::Submit {
+        ExecuteMsg::SubmitBid {
             amount,
             premium_slot,
-        } => submit(deps, env, info, amount, premium_slot),
+        } => submit_bid(deps, env, info, amount, premium_slot),
         // Withdraw all liquidated bLuna from Anchor
-        ExecuteMsg::Liquidate {} => liquidate(info),
+        ExecuteMsg::ClaimLiquidation {} => claim_liquidation(info),
         // Transfer ownership to the other address
         // Owner will be service account address
         // Only owner can execute
@@ -159,7 +159,7 @@ fn deposit(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, Contr
     }
 }
 
-fn submit(
+fn submit_bid(
     deps: DepsMut,
     env: Env,
     info: MessageInfo,
@@ -191,11 +191,11 @@ fn submit(
                 })?,
             })))
     } else {
-        Err(InsufficientUSD {})
+        Err(InsufficientUsd {})
     }
 }
 
-pub fn activate(info: MessageInfo) -> Result<Response, ContractError> {
+pub fn activate_bid(info: MessageInfo) -> Result<Response, ContractError> {
     Ok(Response::new()
         .add_attributes(vec![attr("action", "activate"), attr("from", info.sender)])
         .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
@@ -208,7 +208,7 @@ pub fn activate(info: MessageInfo) -> Result<Response, ContractError> {
         })))
 }
 
-fn withdraw(
+fn withdraw_ust(
     deps: DepsMut,
     env: Env,
     info: MessageInfo,
@@ -328,7 +328,7 @@ fn withdraw(
                 start_after = Some(res.bids.last().unwrap().idx);
             }
             if !usd_balance.is_zero() {
-                Err(InsufficientUSD {})
+                Err(InsufficientUsd {})
             } else {
                 messages.push(CosmosMsg::Bank(BankMsg::Send {
                     to_address: info.sender.to_string(),
@@ -350,7 +350,7 @@ fn withdraw(
     }
 }
 
-fn claim(
+fn withdraw_b_luna(
     deps: DepsMut,
     env: Env,
     info: MessageInfo,
@@ -456,7 +456,7 @@ fn claim(
     }
 }
 
-fn liquidate(info: MessageInfo) -> Result<Response, ContractError> {
+fn claim_liquidation(info: MessageInfo) -> Result<Response, ContractError> {
     Ok(Response::new()
         .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
@@ -499,7 +499,7 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
         // Return true if activate is needed
         QueryMsg::Activatable {} => to_binary(&query_activatable(deps, env)?),
         // Return true if liquidate is needed
-        QueryMsg::Liquidatable {} => to_binary(&query_liquidatable(deps, env)?),
+        QueryMsg::Claimable {} => to_binary(&query_claimable(deps, env)?),
     }
 }
 
@@ -588,7 +588,7 @@ fn query_activatable(deps: Deps, env: Env) -> StdResult<ActivatableResponse> {
     Ok(ActivatableResponse { activatable: false })
 }
 
-fn query_liquidatable(deps: Deps, env: Env) -> StdResult<LiquidatableResponse> {
+fn query_claimable(deps: Deps, env: Env) -> StdResult<ClaimableResponse> {
     let mut start_after: Option<Uint128> = Some(Uint128::zero());
     loop {
         let res: BidsResponse = deps.querier.query_wasm_smart(
@@ -602,7 +602,7 @@ fn query_liquidatable(deps: Deps, env: Env) -> StdResult<LiquidatableResponse> {
         )?;
         for item in &res.bids {
             if !item.pending_liquidated_collateral.is_zero() {
-                return Ok(LiquidatableResponse { liquidatable: true });
+                return Ok(ClaimableResponse { claimable: true });
             }
         }
         if res.bids.len() < 31 {
@@ -610,9 +610,7 @@ fn query_liquidatable(deps: Deps, env: Env) -> StdResult<LiquidatableResponse> {
         }
         start_after = Some(res.bids.last().unwrap().idx);
     }
-    Ok(LiquidatableResponse {
-        liquidatable: false,
-    })
+    Ok(ClaimableResponse { claimable: false })
 }
 
 #[cfg(test)]
