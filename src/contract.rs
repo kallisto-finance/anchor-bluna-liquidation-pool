@@ -88,7 +88,8 @@ fn deposit(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, Contr
             let mut usd_balance = deps
                 .querier
                 .query_balance(&env.contract.address, "uusd")?
-                .amount;
+                .amount
+                - info.funds[0].amount;
             // bLuna in vault
             let b_luna_balance_response: Cw20BalanceResponse = deps.querier.query_wasm_smart(
                 B_LUNA_ADDR,
@@ -264,9 +265,11 @@ fn withdraw_ust(
         let price = price_response.rate;
         // Calculate total cap
         let total_cap = Uint128::try_from(Uint256::from(b_luna_balance).mul(price))? + usd_balance;
-        let state = STATE.load(deps.storage)?;
+        let mut state = STATE.load(deps.storage)?;
         // Calculate exact amount from share and total cap
         let withdraw_cap = total_cap * share / state.total_supply;
+        state.total_supply -= share;
+        STATE.save(deps.storage, &state)?;
         // Withdraw if UST in vault is enough
         if uusd_balance >= withdraw_cap {
             Ok(Response::new()
@@ -406,9 +409,11 @@ fn withdraw_b_luna(
         // Total cap in bLuna price
         let total_cap = b_luna_balance_response.balance
             + Uint128::try_from(Uint256::from(usd_balance).mul(price.inv().unwrap()))?;
-        let state = STATE.load(deps.storage)?;
+        let mut state = STATE.load(deps.storage)?;
         // Calculate bLuna amount from share
         let withdraw_cap = total_cap * share / state.total_supply;
+        state.total_supply -= share;
+        STATE.save(deps.storage, &state)?;
         if b_luna_balance_response.balance >= withdraw_cap {
             Ok(Response::new()
                 .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
