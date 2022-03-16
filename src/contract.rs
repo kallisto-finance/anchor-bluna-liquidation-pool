@@ -484,6 +484,7 @@ pub fn transfer_ownership(
         return Err(Unauthorized {});
     }
     state.owner = new_owner.clone();
+    STATE.save(deps.storage, &state)?;
 
     Ok(Response::new().add_attributes(vec![
         attr("action", "transfer_ownership"),
