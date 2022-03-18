@@ -1,4 +1,5 @@
-use cosmwasm_std::{Addr, Decimal256, Uint128, Uint256};
+use crate::state::Permission;
+use cosmwasm_std::{Addr, Binary, Decimal, Decimal256, Uint128, Uint256};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -11,12 +12,27 @@ pub struct InstantiateMsg {
 #[serde(rename_all = "snake_case")]
 pub enum ExecuteMsg {
     Deposit {},
-    WithdrawUst { share: Uint128 },
-    WithdrawBLuna { share: Uint128 },
+    WithdrawUst {
+        share: Uint128,
+    },
     ActivateBid {},
-    SubmitBid { amount: Uint128, premium_slot: u8 },
+    SubmitBid {
+        amount: Uint128,
+        premium_slot: u8,
+    },
     ClaimLiquidation {},
-    TransferOwnership { new_owner: Addr },
+    TransferOwnership {
+        new_owner: Addr,
+    },
+    Unlock {},
+    Swap {},
+    Pause {
+        pause: bool,
+    },
+    SetPermission {
+        address: Addr,
+        new_permission: Permission,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -42,6 +58,17 @@ pub enum ExternalExecuteMsg {
         recipient: String,
         amount: Uint128,
     },
+    ExecuteSwapOperations {
+        operations: Vec<SwapOperation>,
+        minimum_receive: Option<Uint128>,
+        to: Option<String>,
+        max_spread: Option<Decimal>,
+    },
+    Send {
+        contract: String,
+        amount: Uint128,
+        msg: Binary,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -53,6 +80,8 @@ pub enum QueryMsg {
     TotalCap {},
     Activatable {},
     Claimable {},
+    WithdrawableLimit { address: String },
+    Permission { address: String },
 }
 
 // We define a custom struct for each query response
@@ -60,6 +89,8 @@ pub enum QueryMsg {
 pub struct InfoResponse {
     pub owner: String,
     pub total_supply: Uint128,
+    pub locked_b_luna: Uint128,
+    pub paused: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -80,6 +111,16 @@ pub struct ActivatableResponse {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ClaimableResponse {
     pub claimable: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct WithdrawableLimitResponse {
+    pub limit: Uint128,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct PermissionResponse {
+    pub permission: Permission,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -131,4 +172,24 @@ pub struct PriceResponse {
     pub rate: Decimal256,
     pub last_updated_base: u64,
     pub last_updated_quote: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SwapOperation {
+    NativeSwap {
+        offer_denom: String,
+        ask_denom: String,
+    },
+    AstroSwap {
+        offer_asset_info: AssetInfo,
+        ask_asset_info: AssetInfo,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AssetInfo {
+    Token { contract_addr: Addr },
+    NativeToken { denom: String },
 }

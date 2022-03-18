@@ -3,12 +3,20 @@
   "title": "State",
   "type": "object",
   "required": [
+    "locked_b_luna",
     "owner",
+    "paused",
     "total_supply"
   ],
   "properties": {
+    "locked_b_luna": {
+      "$ref": "#/definitions/Uint128"
+    },
     "owner": {
       "$ref": "#/definitions/Addr"
+    },
+    "paused": {
+      "type": "boolean"
     },
     "total_supply": {
       "$ref": "#/definitions/Uint128"
