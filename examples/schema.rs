@@ -5,7 +5,8 @@ use cosmwasm_schema::{export_schema, remove_schemas, schema_for};
 
 use terra_deposit_withdraw::msg::{
     ActivatableResponse, BalanceResponse, ClaimableResponse, ExecuteMsg, InfoResponse,
-    InstantiateMsg, QueryMsg, TotalCapResponse, PermissionResponse, PriceResponse, WithdrawableLimitResponse,
+    InstantiateMsg, PermissionResponse, PriceResponse, QueryMsg, TotalCapResponse,
+    WithdrawableLimitResponse,
 };
 use terra_deposit_withdraw::state::State;
 
