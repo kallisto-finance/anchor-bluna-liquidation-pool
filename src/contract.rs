@@ -1,4 +1,4 @@
-use crate::ContractError::{DivideByZeroError, Insufficient, Invalidate, Unauthorized};
+use crate::ContractError::{DivideByZeroError, Insufficient, Invalidate, Paused, Unauthorized};
 
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
@@ -95,6 +95,9 @@ fn deposit(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, Contr
         return Err(Invalidate {});
     }
     let mut state = STATE.load(deps.storage)?;
+    if state.paused {
+        return Err(Paused {});
+    }
     // UST in vault
     let mut usd_balance = deps
         .querier

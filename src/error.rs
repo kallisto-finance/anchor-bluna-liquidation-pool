@@ -23,6 +23,9 @@ pub enum ContractError {
 
     #[error("Invalidate Input")]
     Invalidate {},
+
+    #[error("Paused")]
+    Paused {},
     // Add any other custom errors you like here.
     // Look at https://docs.rs/thiserror/1.0.21/thiserror/ for details.
 }
