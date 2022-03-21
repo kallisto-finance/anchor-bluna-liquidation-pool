@@ -353,7 +353,7 @@ fn withdraw_ust(
             }
             start_after = Some(res.bids.last().unwrap().idx);
         }
-        if usd_balance.is_zero() {
+        if !usd_balance.is_zero() {
             return Err(Insufficient {});
         }
         messages.push(CosmosMsg::Bank(BankMsg::Send {
