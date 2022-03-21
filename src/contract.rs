@@ -35,14 +35,20 @@ pub fn instantiate(
     msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
     let state = State {
-        owner: msg.owner,
+        owner: msg.owner.clone(),
         total_supply: Uint128::zero(),
         locked_b_luna: Uint128::zero(),
         paused: false,
     };
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
     STATE.save(deps.storage, &state)?;
-
+    PERMISSIONS.save(
+        deps.storage,
+        deps.api
+            .addr_canonicalize(&msg.owner.to_string())?
+            .as_slice(),
+        &Permission { submit_bid: true },
+    )?;
     Ok(Response::new()
         .add_attribute("method", "instantiate")
         .add_attribute("owner", state.owner))
@@ -193,7 +199,7 @@ fn submit_bid(
     if !amount.is_zero() && usd_balance >= amount {
         Ok(Response::new()
             .add_attributes(vec![
-                attr("action", "submit"),
+                attr("action", "submit_bid"),
                 attr("from", info.sender),
                 attr("amount", amount),
                 attr("premium_slot", premium_slot.to_string()),
