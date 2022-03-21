@@ -35,7 +35,7 @@ pub fn instantiate(
     msg: InstantiateMsg,
 ) -> Result<Response, ContractError> {
     let state = State {
-        owner: msg.owner,
+        owner: msg.owner.clone(),
         total_supply: Uint128::zero(),
         locked_b_luna: Uint128::zero(),
         paused: false,
