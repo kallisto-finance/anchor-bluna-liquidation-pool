@@ -1,1 +1,1 @@
-f392b61747cde6e0c137c3c4b4c137ed5c11511bcdb3ae7d1fe87907d903ab7b  terra_deposit_withdraw.wasm
+939786860aacc92e14b3915b033f823d85dcd74e42a0ae607b318323ebd077f0  terra_deposit_withdraw.wasm

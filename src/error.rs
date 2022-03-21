@@ -12,20 +12,14 @@ pub enum ContractError {
     #[error("Conversion Overflow")]
     ConversionOverflowError(#[from] ConversionOverflowError),
 
+    #[error("Divide By Zero")]
+    DivideByZeroError {},
+
     #[error("Unauthorized")]
     Unauthorized {},
 
-    #[error("Wrong Coin Data")]
-    CoinError {},
-
-    #[error("Wrong Coin Count")]
-    CoinCountError {},
-
-    #[error("Insufficient USD")]
-    InsufficientUsd {},
-
-    #[error("Insufficient Balance")]
-    InsufficientBalance {},
+    #[error("Insufficient")]
+    Insufficient {},
 
     #[error("Invalidate Input")]
     Invalidate {},
