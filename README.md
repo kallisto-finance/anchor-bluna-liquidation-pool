@@ -196,7 +196,7 @@ Get withdrawable UST for users.
 
 ### Permission
 
-Get withdrawable UST for users.
+Get permission of the address.
 
 | Key      | Type   | Description                           |
 |----------|--------|---------------------------------------|
