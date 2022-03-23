@@ -33,14 +33,6 @@ User withdraws UST from vault.
 | share | Uint128 | Share amount to withdraw UST |
 
 
-### WithdrawBLuna
-
-User withdraws bLuna from vault.
-
-| Key   | Type    | Description                    |
-|-------|---------|--------------------------------|
-| share | Uint128 | Share amount to withdraw bLuna |
-
 ### ActivateBid
 
 Activate all bids.
@@ -66,13 +58,52 @@ Withdraw all liquidated bLuna from Anchor Liquidation Queue.
 |-----|------|-------------|
 | -   | -    | -           |
 
-### TransferOwnership**
+### TransferOwnership***
 
 Transfer ownership to another address.
 
 | Key          | Type | Description       |
 |--------------|------|-------------------|
 | new_owner    | Addr | New owner address |
+
+### Unlock
+
+Unlock locked bLuna.
+
+| Key | Type | Description |
+|-----|------|-------------|
+| -   | -    | -           |
+
+### Swap
+
+Swap unlocked bLuna into UST using astroport.
+
+| Key | Type | Description |
+|-----|------|-------------|
+| -   | -    | -           |
+
+### Pause
+
+Swap unlocked bLuna into UST using astroport.
+
+| Key   | Type | Description                          |
+|-------|------|--------------------------------------|
+| pause | bool | `true` for pause, `false` for resume |
+
+### SetPermission
+
+Swap unlocked bLuna into UST using astroport.
+
+| Key            | Type       | Description                   |
+|----------------|------------|-------------------------------|
+| address        | Addr       | The address to set permission |
+| new_permission | Permission | Permissions                   |
+
+#### Permission(Struct)
+
+| Key            | Type       | Description                  |
+|----------------|------------|------------------------------|
+| submit_bid     | bool       | `true` if able to submit bid |
 
 ## QueryMsg
 
@@ -84,12 +115,14 @@ Get owner address and total supply.
 |-----|------|-------------|
 | -   | -    | -           |
 
-### InfoResponse
+#### InfoResponse
 
-| Key          | Type    | Description                      |
-|--------------|---------|----------------------------------|
-| owner        | String  | Owner address                    |
-| total_supply | Uint128 | Total supply amount of the vault |
+| Key           | Type    | Description                      |
+|---------------|---------|----------------------------------|
+| owner         | String  | Owner address                    |
+| total_supply  | Uint128 | Total supply amount of the vault |
+| locked_b_luna | Uint128 | Locked bLuna amount              |
+| paused        | bool    | `true` if paused                 |
 
 ### Balance
 
@@ -99,7 +132,7 @@ Get share of vault from address.
 |---------|--------|------------------------|
 | address | String | Address to get balance |
 
-### BalanceResponse
+#### BalanceResponse
 
 | Key          | Type    | Description                        |
 |--------------|---------|------------------------------------|
@@ -113,7 +146,7 @@ Get total cap in vault and anchor.
 |-----|------|-------------|
 | -   | -    | -           |
 
-### TotalCapResponse
+#### TotalCapResponse
 
 | Key       | Type    | Description                                                       |
 |-----------|---------|-------------------------------------------------------------------|
@@ -127,12 +160,11 @@ Check if there are bids to activate.
 |-----|------|-------------|
 | -   | -    | -           |
 
-### ActivatableResponse
+#### ActivatableResponse
 
 | Key         | Type | Description                   |
 |-------------|------|-------------------------------|
 | activatable | bool | True if activate is available |
-
 
 ### Claimable
 
@@ -142,12 +174,42 @@ Check if there is pending liquidated collateral.
 |-----|------|-------------|
 | -   | -    | -           |
 
-### ClaimableResponse
+#### ClaimableResponse
 
 | Key       | Type | Description                    |
 |-----------|------|--------------------------------|
 | claimable | bool | True if liquidate is available |
 
+### WithdrawableLimit
+
+Get withdrawable UST for users.
+
+| Key      | Type   | Description                            |
+|----------|--------|----------------------------------------|
+| addresss | String | Address to get withdrawable UST amount |
+
+#### WithdrawableLimitResponse
+
+| Key   | Type    | Description                    |
+|-------|---------|--------------------------------|
+| limit | Uint128 | True if liquidate is available |
+
+### Permission
+
+Get withdrawable UST for users.
+
+| Key      | Type   | Description                           |
+|----------|--------|---------------------------------------|
+| addresss | String | Address to get permission information |
+
+#### PermissionResponse
+
+| Key        | Type       | Description            |
+|------------|------------|------------------------|
+| permission | Permission | Permission information |
+
 *: Requires UST to be sent beforehand.
 
-**: Only owner can execute.
+**: The user who has permission can execute only.
+
+***: Only owner can execute.
