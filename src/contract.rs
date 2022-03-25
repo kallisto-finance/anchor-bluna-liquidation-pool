@@ -18,7 +18,8 @@ use crate::msg::SwapOperation::{AstroSwap, NativeSwap};
 use crate::msg::{
     ActivatableResponse, BalanceResponse, BidsResponse, ClaimableResponse, Cw20BalanceResponse,
     ExecuteMsg, ExternalExecuteMsg, ExternalQueryMsg, InfoResponse, InstantiateMsg,
-    PermissionResponse, PriceResponse, QueryMsg, TotalCapResponse, WithdrawableLimitResponse,
+    PermissionResponse, PriceResponse, QueryMsg, TotalCapResponse, UnlockableResponse,
+    WithdrawableLimitResponse,
 };
 use crate::state::{
     Permission, State, TokenRecord, ANCHOR_LIQUIDATION_QUEUE_ADDR, ASTROPORT_ROUTER, BALANCES,
@@ -606,6 +607,7 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
             to_binary(&query_withdrawable_limit(deps, env, address)?)
         }
         QueryMsg::Permission { address } => to_binary(&query_permission(deps, address)?),
+        QueryMsg::Unlockable {} => to_binary(&query_unlockable(deps, env)?),
     }
 }
 
@@ -801,6 +803,17 @@ fn query_permission(deps: Deps, address: String) -> StdResult<PermissionResponse
         .may_load(deps.storage, address.as_slice())?
         .unwrap_or(Permission { submit_bid: false });
     Ok(PermissionResponse { permission })
+}
+
+fn query_unlockable(deps: Deps, env: Env) -> StdResult<UnlockableResponse> {
+    let mut keys = CLAIM_LIST.keys(deps.storage, None, None, Order::Ascending);
+    if let Some(key) = keys.next() {
+        let claim = CLAIM_LIST.load(deps.storage, U32Key::from(key))?;
+        if claim.timestamp.plus_seconds(LOCK_PERIOD) <= env.block.time {
+            return Ok(UnlockableResponse { unlockable: true });
+        }
+    }
+    Ok(UnlockableResponse { unlockable: false })
 }
 
 #[cfg(test)]

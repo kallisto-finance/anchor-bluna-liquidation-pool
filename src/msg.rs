@@ -82,6 +82,7 @@ pub enum QueryMsg {
     Claimable {},
     WithdrawableLimit { address: String },
     Permission { address: String },
+    Unlockable {},
 }
 
 // We define a custom struct for each query response
@@ -121,6 +122,11 @@ pub struct WithdrawableLimitResponse {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct PermissionResponse {
     pub permission: Permission,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct UnlockableResponse {
+    pub unlockable: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
