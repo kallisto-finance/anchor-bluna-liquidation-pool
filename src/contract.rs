@@ -2,12 +2,14 @@ use crate::ContractError::{DivideByZeroError, Insufficient, Invalidate, Paused, 
 
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
+use cosmwasm_std::Order::Ascending;
 use cosmwasm_std::{
     attr, to_binary, Addr, BankMsg, Binary, Coin, CosmosMsg, Deps, DepsMut, Env, MessageInfo,
-    Response, StdResult, Uint128, Uint256, WasmMsg,
+    Order, Response, StdResult, Uint128, Uint256, WasmMsg,
 };
 use cw2::set_contract_version;
-use std::convert::TryFrom;
+use cw_storage_plus::U32Key;
+use std::convert::{TryFrom, TryInto};
 use std::ops::Mul;
 
 use crate::error::ContractError;
@@ -400,25 +402,24 @@ fn claim_liquidation(
     if b_luna_balance.is_zero() {
         return Err(Insufficient {});
     }
-    let mut claim_list = CLAIM_LIST.load(deps.storage)?;
-    claim_list.push(TokenRecord {
-        amount: b_luna_balance,
-        timestamp: env.block.time,
-    });
+    let last_key = CLAIM_LIST.keys(deps.storage, None, None, Ascending).last();
+    let new_key = if let Some(value) = last_key {
+        u32::from_be_bytes(value.as_slice().try_into().unwrap()) + 1
+    } else {
+        0
+    };
+    CLAIM_LIST.save(
+        deps.storage,
+        U32Key::from(new_key),
+        &TokenRecord {
+            amount: b_luna_balance,
+            timestamp: env.block.time,
+        },
+    )?;
+
     let mut state = STATE.load(deps.storage)?;
     state.locked_b_luna += b_luna_balance;
-    let mut unlocked_b_luna = Uint128::zero();
-    claim_list.retain(|claim| {
-        if claim.timestamp.plus_seconds(LOCK_PERIOD) <= env.block.time {
-            unlocked_b_luna += claim.amount;
-            false
-        } else {
-            true
-        }
-    });
-    state.locked_b_luna -= unlocked_b_luna;
     STATE.save(deps.storage, &state)?;
-    CLAIM_LIST.save(deps.storage, &claim_list)?;
     Ok(Response::new()
         .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
             contract_addr: ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
@@ -432,11 +433,6 @@ fn claim_liquidation(
             attr("action", "liquidate"),
             attr("from", &info.sender),
             attr("amount", b_luna_balance.to_string()),
-        ])
-        .add_attributes(vec![
-            attr("action", "unlock"),
-            attr("from", info.sender),
-            attr("amount", unlocked_b_luna.to_string()),
         ]))
 }
 
@@ -460,21 +456,25 @@ pub fn transfer_ownership(
 }
 
 fn unlock(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, ContractError> {
-    let mut claim_list = CLAIM_LIST.load(deps.storage)?;
-    let mut state = STATE.load(deps.storage)?;
+    let keys = CLAIM_LIST.keys(deps.storage, None, None, Order::Ascending);
+    let mut remove_keys = Vec::new();
     let mut unlocked_b_luna = Uint128::zero();
-    claim_list.retain(|claim| {
+    for key in keys {
+        let claim = CLAIM_LIST.load(deps.storage, U32Key::from(key.clone()))?;
         if claim.timestamp.plus_seconds(LOCK_PERIOD) <= env.block.time {
             unlocked_b_luna += claim.amount;
-            false
+            remove_keys.push(U32Key::from(key));
         } else {
-            true
+            break;
         }
-    });
+    }
+    for key in remove_keys {
+        CLAIM_LIST.remove(deps.storage, key);
+    }
     if unlocked_b_luna.is_zero() {
         return Err(Insufficient {});
     }
-    CLAIM_LIST.save(deps.storage, &claim_list)?;
+    let mut state = STATE.load(deps.storage)?;
     state.locked_b_luna -= unlocked_b_luna;
     STATE.save(deps.storage, &state)?;
     Ok(Response::new().add_attributes(vec![
