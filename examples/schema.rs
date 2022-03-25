@@ -6,7 +6,7 @@ use cosmwasm_schema::{export_schema, remove_schemas, schema_for};
 use terra_deposit_withdraw::msg::{
     ActivatableResponse, BalanceResponse, ClaimableResponse, ExecuteMsg, InfoResponse,
     InstantiateMsg, PermissionResponse, PriceResponse, QueryMsg, TotalCapResponse,
-    WithdrawableLimitResponse,
+    UnlockableResponse, WithdrawableLimitResponse,
 };
 use terra_deposit_withdraw::state::State;
 
@@ -28,4 +28,5 @@ fn main() {
     export_schema(&schema_for!(PermissionResponse), &out_dir);
     export_schema(&schema_for!(PriceResponse), &out_dir);
     export_schema(&schema_for!(WithdrawableLimitResponse), &out_dir);
+    export_schema(&schema_for!(UnlockableResponse), &out_dir);
 }
