@@ -39,4 +39,4 @@ pub const PRICE_ORACLE_ADDR: &str = "terra1cgg6yef7qcdm070qftghfulaxmllgmvk77nc7
 
 pub const ASTROPORT_ROUTER: &str = "terra16t7dpwwgx9n3lq6l6te3753lsjqwhxwpday9zx";
 
-pub const LOCK_PERIOD: u64 = 14 * 24 * 60 * 60;
+pub const LOCK_PERIOD: u64 = 10 * 60;
