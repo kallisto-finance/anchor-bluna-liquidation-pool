@@ -24,6 +24,9 @@ pub enum ContractError {
     #[error("Invalidate Input")]
     Invalidate {},
 
+    #[error("Locked")]
+    Locked {},
+
     #[error("Paused")]
     Paused {},
     // Add any other custom errors you like here.

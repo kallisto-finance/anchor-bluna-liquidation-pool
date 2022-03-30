@@ -3,10 +3,14 @@
   "title": "InstantiateMsg",
   "type": "object",
   "required": [
-    "owner"
+    "owner",
+    "swap_wallet"
   ],
   "properties": {
     "owner": {
+      "$ref": "#/definitions/Addr"
+    },
+    "swap_wallet": {
       "$ref": "#/definitions/Addr"
     }
   },
