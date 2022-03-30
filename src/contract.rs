@@ -828,6 +828,7 @@ fn query_info(deps: Deps) -> StdResult<InfoResponse> {
         total_supply: state.total_supply,
         locked_b_luna: state.locked_b_luna,
         paused: state.paused,
+        swap_wallet: state.swap_wallet.to_string(),
     })
 }
 

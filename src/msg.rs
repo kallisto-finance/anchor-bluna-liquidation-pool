@@ -100,6 +100,7 @@ pub struct InfoResponse {
     pub total_supply: Uint128,
     pub locked_b_luna: Uint128,
     pub paused: bool,
+    pub swap_wallet: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
