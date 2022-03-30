@@ -9,6 +9,7 @@ pub struct State {
     pub owner: Addr,
     pub total_supply: Uint128,
     pub locked_b_luna: Uint128,
+    pub swap_wallet: Addr,
     pub paused: bool,
 }
 
@@ -25,6 +26,8 @@ pub struct Permission {
 
 pub const BALANCES: Map<&[u8], Uint128> = Map::new("balance");
 
+pub const LAST_DEPOSIT: Map<&[u8], Timestamp> = Map::new("last_deposit");
+
 pub const PERMISSIONS: Map<&[u8], Permission> = Map::new("permission");
 
 pub const STATE: Item<State> = Item::new("state");
@@ -39,4 +42,6 @@ pub const PRICE_ORACLE_ADDR: &str = "terra1cgg6yef7qcdm070qftghfulaxmllgmvk77nc7
 
 pub const ASTROPORT_ROUTER: &str = "terra16t7dpwwgx9n3lq6l6te3753lsjqwhxwpday9zx";
 
-pub const LOCK_PERIOD: u64 = 10 * 60;
+pub const LOCK_PERIOD: u64 = 14 * 24 * 60 * 60;
+
+pub const WITHDRAW_LOCK: u64 = 60 * 60;

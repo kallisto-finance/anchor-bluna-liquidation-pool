@@ -1,11 +1,12 @@
 use crate::state::Permission;
-use cosmwasm_std::{Addr, Binary, Decimal, Decimal256, Uint128, Uint256};
+use cosmwasm_std::{Addr, Binary, Decimal, Decimal256, Timestamp, Uint128, Uint256};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InstantiateMsg {
     pub owner: Addr,
+    pub swap_wallet: Addr,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -33,11 +34,14 @@ pub enum ExecuteMsg {
         address: Addr,
         new_permission: Permission,
     },
+    SetSwapWallet {
+        address: Addr,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum ExternalExecuteMsg {
+pub enum ExternalMsg {
     ActivateBids {
         collateral_token: String,
         bids_idx: Option<Vec<Uint128>>,
@@ -69,6 +73,9 @@ pub enum ExternalExecuteMsg {
         amount: Uint128,
         msg: Binary,
     },
+    Swap {
+        to: Addr,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -83,6 +90,7 @@ pub enum QueryMsg {
     WithdrawableLimit { address: String },
     Permission { address: String },
     Unlockable {},
+    LastDepositTimestamp { address: String },
 }
 
 // We define a custom struct for each query response
@@ -178,6 +186,11 @@ pub struct PriceResponse {
     pub rate: Decimal256,
     pub last_updated_base: u64,
     pub last_updated_quote: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct TimestampResponse {
+    pub timestamp: Timestamp,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
