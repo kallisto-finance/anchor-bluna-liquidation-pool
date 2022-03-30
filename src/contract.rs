@@ -673,6 +673,7 @@ fn unlock(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, Contra
         attr("amount", unlocked_b_luna.to_string()),
     ]))
 }
+
 fn set_permission(
     deps: DepsMut,
     info: MessageInfo,
@@ -695,16 +696,12 @@ fn set_permission(
     if permission == (Permission { submit_bid: false }) {
         PERMISSIONS.remove(
             deps.storage,
-            deps.api
-                .addr_canonicalize(&info.sender.to_string())?
-                .as_slice(),
+            deps.api.addr_canonicalize(&address.to_string())?.as_slice(),
         );
     } else {
         PERMISSIONS.save(
             deps.storage,
-            deps.api
-                .addr_canonicalize(&info.sender.to_string())?
-                .as_slice(),
+            deps.api.addr_canonicalize(&address.to_string())?.as_slice(),
             &permission,
         )?;
     }
@@ -715,6 +712,7 @@ fn set_permission(
         attr("submit_bid", new_permission.submit_bid.to_string()),
     ]))
 }
+
 fn swap(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, ContractError> {
     let state = STATE.load(deps.storage)?;
     let b_luna_balance_response: Cw20BalanceResponse = deps.querier.query_wasm_smart(
