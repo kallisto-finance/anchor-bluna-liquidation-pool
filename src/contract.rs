@@ -622,6 +622,19 @@ pub fn transfer_ownership(
     if state.owner != info.sender {
         return Err(Unauthorized {});
     }
+    PERMISSIONS.remove(
+        deps.storage,
+        deps.api
+            .addr_canonicalize(&state.owner.to_string())?
+            .as_slice(),
+    );
+    PERMISSIONS.save(
+        deps.storage,
+        deps.api
+            .addr_canonicalize(&new_owner.to_string())?
+            .as_slice(),
+        &Permission { submit_bid: true },
+    )?;
     state.owner = new_owner.clone();
     STATE.save(deps.storage, &state)?;
 
