@@ -75,7 +75,7 @@ pub fn execute(
         // Withdraw UST from vault
         ExecuteMsg::WithdrawUst { share } => withdraw_ust(deps, env, info, share),
         // Activate all bids
-        ExecuteMsg::ActivateBid {} => activate_bid(info),
+        ExecuteMsg::ActivateBid {} => activate_bid(deps, env, info),
         // Submit bid with amount and premium slot from service
         // Only owner can execute
         ExecuteMsg::SubmitBid {
@@ -113,11 +113,10 @@ fn deposit(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, Contr
     if state.paused {
         return Err(Paused {});
     }
+    let msg_sender = info.sender.to_string().to_lowercase();
     LAST_DEPOSIT.save(
         deps.storage,
-        deps.api
-            .addr_canonicalize(&info.sender.to_string())?
-            .as_slice(),
+        deps.api.addr_canonicalize(&msg_sender)?.as_slice(),
         &env.block.time,
     )?;
     // UST in vault
@@ -177,9 +176,7 @@ fn deposit(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, Contr
     STATE.save(deps.storage, &state)?;
     BALANCES.update(
         deps.storage,
-        deps.api
-            .addr_canonicalize(&info.sender.to_string())?
-            .as_slice(),
+        deps.api.addr_canonicalize(&msg_sender)?.as_slice(),
         |balance| -> StdResult<_> { Ok(balance.unwrap_or_default() + share) },
     )?;
     Ok(Response::new().add_attributes(vec![
@@ -201,7 +198,7 @@ fn submit_bid(
         .may_load(
             deps.storage,
             deps.api
-                .addr_canonicalize(&info.sender.to_string())?
+                .addr_canonicalize(info.sender.to_string().to_lowercase().as_str())?
                 .as_slice(),
         )?
         .unwrap_or(Permission { submit_bid: false });
@@ -233,7 +230,33 @@ fn submit_bid(
     }
 }
 
-fn activate_bid(info: MessageInfo) -> Result<Response, ContractError> {
+fn activate_bid(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, ContractError> {
+    let mut start_after: Option<Uint128> = Some(Uint128::zero());
+    let mut bids_idx = Vec::new();
+    loop {
+        let res: BidsResponse = deps.querier.query_wasm_smart(
+            ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
+            &ExternalQueryMsg::BidsByUser {
+                collateral_token: B_LUNA_ADDR.to_string(),
+                bidder: env.contract.address.to_string(),
+                start_after,
+                limit: Some(31),
+            },
+        )?;
+        for item in &res.bids {
+            if let Some(wait_end) = item.wait_end {
+                if wait_end < env.block.time.seconds() {
+                    bids_idx.push(item.idx);
+                } else {
+                    break;
+                }
+            }
+        }
+        if res.bids.len() < 31 {
+            break;
+        }
+        start_after = Some(res.bids.last().unwrap().idx);
+    }
     Ok(Response::new()
         .add_attributes(vec![attr("action", "activate"), attr("from", info.sender)])
         .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
@@ -241,7 +264,7 @@ fn activate_bid(info: MessageInfo) -> Result<Response, ContractError> {
             funds: vec![],
             msg: to_binary(&ExternalMsg::ActivateBids {
                 collateral_token: B_LUNA_ADDR.to_string(),
-                bids_idx: None,
+                bids_idx: Some(bids_idx),
             })?,
         })))
 }
@@ -255,11 +278,10 @@ fn withdraw_ust(
     if share.is_zero() {
         return Err(Invalidate {});
     }
+    let msg_sender = info.sender.to_string().to_lowercase();
     let last_timestamp = LAST_DEPOSIT.may_load(
         deps.storage,
-        deps.api
-            .addr_canonicalize(&info.sender.to_string())?
-            .as_slice(),
+        deps.api.addr_canonicalize(&msg_sender)?.as_slice(),
     )?;
     if let Some(timestamp) = last_timestamp {
         if timestamp.plus_seconds(WITHDRAW_LOCK) >= env.block.time {
@@ -268,9 +290,7 @@ fn withdraw_ust(
     }
     BALANCES.update(
         deps.storage,
-        deps.api
-            .addr_canonicalize(&info.sender.to_string())?
-            .as_slice(),
+        deps.api.addr_canonicalize(&msg_sender)?.as_slice(),
         |balance| -> StdResult<_> { Ok(balance.unwrap_or_default().checked_sub(share)?) },
     )?;
     let uusd_balance = deps
@@ -324,7 +344,7 @@ fn withdraw_ust(
     if uusd_balance >= withdraw_cap {
         Ok(Response::new()
             .add_message(CosmosMsg::Bank(BankMsg::Send {
-                to_address: info.sender.to_string(),
+                to_address: msg_sender,
                 amount: vec![Coin {
                     denom: "uusd".to_string(),
                     amount: withdraw_cap,
@@ -381,7 +401,7 @@ fn withdraw_ust(
             start_after = Some(res.bids.last().unwrap().idx);
         }
         messages.push(CosmosMsg::Bank(BankMsg::Send {
-            to_address: info.sender.to_string(),
+            to_address: msg_sender.clone(),
             amount: vec![Coin {
                 denom: "uusd".to_string(),
                 amount: withdraw_cap,
@@ -442,7 +462,7 @@ fn withdraw_ust(
                                 },
                             ],
                             minimum_receive: None,
-                            to: Some(info.sender.to_string()),
+                            to: Some(msg_sender.clone()),
                             max_spread: None,
                         })?,
                     })?,
@@ -500,7 +520,7 @@ fn withdraw_ust(
                     msg: to_binary(&ExternalMsg::Send {
                         contract: state.swap_wallet.to_string(),
                         amount: b_luna_withdraw,
-                        msg: to_binary(&info.sender)?,
+                        msg: to_binary(&deps.api.addr_validate(&msg_sender)?)?,
                     })?,
                     funds: vec![],
                 }));
@@ -619,7 +639,7 @@ pub fn transfer_ownership(
     new_owner: Addr,
 ) -> Result<Response, ContractError> {
     let mut state = STATE.load(deps.storage)?;
-    if state.owner != info.sender {
+    if state.owner.to_string().to_lowercase() != info.sender.to_string().to_lowercase() {
         return Err(Unauthorized {});
     }
     PERMISSIONS.remove(
@@ -681,7 +701,7 @@ fn set_permission(
     new_permission: Permission,
 ) -> Result<Response, ContractError> {
     let state = STATE.load(deps.storage)?;
-    if state.owner != info.sender {
+    if state.owner.to_string().to_lowercase() != info.sender.to_string().to_lowercase() {
         return Err(Unauthorized {});
     }
     let permission = PERMISSIONS
@@ -763,7 +783,7 @@ fn swap(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, Contract
 
 fn pause_resume(deps: DepsMut, info: MessageInfo, pause: bool) -> Result<Response, ContractError> {
     let mut state = STATE.load(deps.storage)?;
-    if state.owner != info.sender {
+    if state.owner.to_string().to_lowercase() != info.sender.to_string().to_lowercase() {
         return Err(Unauthorized {});
     }
     if state.paused == pause {
@@ -783,7 +803,7 @@ fn set_swap_wallet(
     address: Addr,
 ) -> Result<Response, ContractError> {
     let mut state = STATE.load(deps.storage)?;
-    if state.owner != info.sender {
+    if state.owner.to_string().to_lowercase() != info.sender.to_string().to_lowercase() {
         return Err(Unauthorized {});
     }
     state.swap_wallet = address.clone();
