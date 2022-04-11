@@ -404,7 +404,7 @@ fn withdraw_ust(
             to_address: msg_sender.clone(),
             amount: vec![Coin {
                 denom: "uusd".to_string(),
-                amount: withdraw_cap,
+                amount: withdraw_cap - usd_balance,
             }],
         }));
         if !usd_balance.is_zero() {
