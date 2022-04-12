@@ -1092,7 +1092,7 @@ mod tests {
             swap_wallet: Addr::unchecked("swap_wallet"),
         };
         let info_init = mock_info("creator", &coins(1000000, "uusd"));
-        let info_deposit = mock_info("creator", &coins(10000, "uusd"));
+        let info_deposit = mock_info("bob", &coins(10000, "uusd"));
 
         // we can just call .unwrap() to assert this was a success
         instantiate(deps.as_mut(), mock_env(), info_init, msg).unwrap();
