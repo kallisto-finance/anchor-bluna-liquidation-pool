@@ -7,6 +7,12 @@ use serde::{Deserialize, Serialize};
 pub struct InstantiateMsg {
     pub owner: Addr,
     pub swap_wallet: Addr,
+    pub anchor_liquidation_queue: Option<Addr>,
+    pub collateral_token: Option<Addr>,
+    pub price_oracle: Option<Addr>,
+    pub astroport_router: Option<Addr>,
+    pub lock_period: Option<u64>,
+    pub withdraw_lock: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
