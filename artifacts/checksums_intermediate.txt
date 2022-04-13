@@ -1,1 +1,1 @@
-a4c418dde2a5e172170ec4f5a5125ac608af9fecf5f7271575f8855c28d7826c  ./target/wasm32-unknown-unknown/release/terra_deposit_withdraw.wasm
+f8fe0505c57b94bffa83068d3b8a6593d74fb3c974d7c73f5604a024d5690d09  ./target/wasm32-unknown-unknown/release/terra_deposit_withdraw.wasm

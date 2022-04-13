@@ -18,10 +18,10 @@ use crate::error::ContractError;
 use crate::msg::AssetInfo::{NativeToken, Token};
 use crate::msg::SwapOperation::{AstroSwap, NativeSwap};
 use crate::msg::{
-    ActivatableResponse, BalanceResponse, BidsResponse, ClaimableResponse, Cw20BalanceResponse,
-    ExecuteMsg, ExternalMsg, ExternalQueryMsg, InfoResponse, InstantiateMsg, PermissionResponse,
-    PriceResponse, QueryMsg, TimestampResponse, TotalCapResponse, UnlockableResponse,
-    WithdrawableLimitResponse,
+    ActivatableResponse, BalanceResponse, BidsResponse, ClaimableResponse, ConfigResponse,
+    Cw20BalanceResponse, ExecuteMsg, ExternalMsg, ExternalQueryMsg, InfoResponse, InstantiateMsg,
+    PermissionResponse, PriceResponse, QueryMsg, TimestampResponse, TotalCapResponse,
+    UnlockableResponse, WithdrawableLimitResponse,
 };
 use crate::state::{
     Permission, State, TokenRecord, BALANCES, CLAIM_LIST, LAST_DEPOSIT, PERMISSIONS, STATE,
@@ -96,18 +96,27 @@ pub fn execute(
         } => submit_bid(deps, env, info, amount, premium_slot),
         // Withdraw all liquidated bLuna from Anchor
         ExecuteMsg::ClaimLiquidation {} => claim_liquidation(deps, env, info),
-        // Transfer ownership to the other address
-        // Owner will be service account address
-        // Only owner can execute
-        ExecuteMsg::TransferOwnership { new_owner } => transfer_ownership(deps, info, new_owner),
         ExecuteMsg::Unlock {} => unlock(deps, env, info),
         ExecuteMsg::Swap {} => swap(deps, env, info),
-        ExecuteMsg::Pause { pause } => pause_resume(deps, info, pause),
         ExecuteMsg::SetPermission {
             address,
             new_permission,
         } => set_permission(deps, info, address, new_permission),
-        ExecuteMsg::SetSwapWallet { address } => set_swap_wallet(deps, info, address),
+        ExecuteMsg::UpdateConfig {
+            owner,
+            paused,
+            swap_wallet,
+            lock_period,
+            withdraw_lock,
+        } => update_config(
+            deps,
+            info,
+            owner,
+            paused,
+            swap_wallet,
+            lock_period,
+            withdraw_lock,
+        ),
     }
 }
 
@@ -648,38 +657,6 @@ fn claim_liquidation(
         ]))
 }
 
-pub fn transfer_ownership(
-    deps: DepsMut,
-    info: MessageInfo,
-    new_owner: Addr,
-) -> Result<Response, ContractError> {
-    let mut state = STATE.load(deps.storage)?;
-    if state.owner.to_string().to_lowercase() != info.sender.to_string().to_lowercase() {
-        return Err(Unauthorized {});
-    }
-    PERMISSIONS.remove(
-        deps.storage,
-        deps.api
-            .addr_canonicalize(&state.owner.to_string())?
-            .as_slice(),
-    );
-    PERMISSIONS.save(
-        deps.storage,
-        deps.api
-            .addr_canonicalize(&new_owner.to_string())?
-            .as_slice(),
-        &Permission { submit_bid: true },
-    )?;
-    state.owner = new_owner.clone();
-    STATE.save(deps.storage, &state)?;
-
-    Ok(Response::new().add_attributes(vec![
-        attr("action", "transfer_ownership"),
-        attr("from", info.sender),
-        attr("to", new_owner.to_string()),
-    ]))
-}
-
 fn unlock(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, ContractError> {
     let keys = CLAIM_LIST.keys(deps.storage, None, None, Order::Ascending);
     let mut remove_keys = Vec::new();
@@ -723,7 +700,9 @@ fn set_permission(
     let permission = PERMISSIONS
         .may_load(
             deps.storage,
-            deps.api.addr_canonicalize(&address.to_string())?.as_slice(),
+            deps.api
+                .addr_canonicalize(&address.to_string().to_lowercase())?
+                .as_slice(),
         )?
         .unwrap_or(Permission { submit_bid: false });
     if permission == new_permission {
@@ -732,19 +711,23 @@ fn set_permission(
     if permission == (Permission { submit_bid: false }) {
         PERMISSIONS.remove(
             deps.storage,
-            deps.api.addr_canonicalize(&address.to_string())?.as_slice(),
+            deps.api
+                .addr_canonicalize(&address.to_string().to_lowercase())?
+                .as_slice(),
         );
     } else {
         PERMISSIONS.save(
             deps.storage,
-            deps.api.addr_canonicalize(&address.to_string())?.as_slice(),
+            deps.api
+                .addr_canonicalize(&address.to_string().to_lowercase())?
+                .as_slice(),
             &permission,
         )?;
     }
     Ok(Response::new().add_attributes(vec![
         attr("action", "set_permission"),
         attr("from", info.sender),
-        attr("to", address.to_string()),
+        attr("to", address.to_string().to_lowercase()),
         attr("submit_bid", new_permission.submit_bid.to_string()),
     ]))
 }
@@ -797,45 +780,79 @@ fn swap(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, Contract
         ]))
 }
 
-fn pause_resume(deps: DepsMut, info: MessageInfo, pause: bool) -> Result<Response, ContractError> {
-    let mut state = STATE.load(deps.storage)?;
-    if state.owner.to_string().to_lowercase() != info.sender.to_string().to_lowercase() {
-        return Err(Unauthorized {});
-    }
-    if state.paused == pause {
-        return Err(Invalidate {});
-    }
-    state.paused = pause;
-    STATE.save(deps.storage, &state)?;
-    Ok(Response::new().add_attributes(vec![
-        attr("action", if pause { "pause" } else { "resume" }),
-        attr("from", info.sender),
-    ]))
-}
-
-fn set_swap_wallet(
+fn update_config(
     deps: DepsMut,
     info: MessageInfo,
-    address: Addr,
+    owner: Option<Addr>,
+    paused: Option<bool>,
+    swap_wallet: Option<Addr>,
+    lock_period: Option<u64>,
+    withdraw_lock: Option<u64>,
 ) -> Result<Response, ContractError> {
     let mut state = STATE.load(deps.storage)?;
     if state.owner.to_string().to_lowercase() != info.sender.to_string().to_lowercase() {
         return Err(Unauthorized {});
     }
-    state.swap_wallet = address.clone();
+    let mut attributes = vec![attr("action", "update_config"), attr("from", info.sender)];
+    if let Some(owner) = owner {
+        if owner.to_string().to_lowercase() != state.owner {
+            PERMISSIONS.remove(
+                deps.storage,
+                deps.api
+                    .addr_canonicalize(state.owner.to_string().as_str())?
+                    .as_slice(),
+            );
+            PERMISSIONS.save(
+                deps.storage,
+                deps.api
+                    .addr_canonicalize(owner.to_string().to_lowercase().as_str())?
+                    .as_slice(),
+                &Permission { submit_bid: true },
+            )?;
+            state.owner = deps
+                .api
+                .addr_validate(owner.to_string().to_lowercase().as_str())?;
+            attributes.push(attr("owner", state.owner.to_string()));
+        }
+    }
+    if let Some(paused) = paused {
+        if paused != state.paused {
+            state.paused = paused;
+            attributes.push(attr("paused", paused.to_string()));
+        }
+    }
+    if let Some(swap_wallet) = swap_wallet {
+        if swap_wallet.to_string().to_lowercase() != state.swap_wallet {
+            state.swap_wallet = deps
+                .api
+                .addr_validate(swap_wallet.to_string().to_lowercase().as_str())?;
+            attributes.push(attr("swap_wallet", state.swap_wallet.to_string()));
+        }
+    }
+    if let Some(lock_period) = lock_period {
+        if lock_period != state.lock_period {
+            state.lock_period = lock_period;
+            attributes.push(attr("lock_period", lock_period.to_string()));
+        }
+    }
+    if let Some(withdraw_lock) = withdraw_lock {
+        if withdraw_lock != state.withdraw_lock {
+            state.withdraw_lock = withdraw_lock;
+            attributes.push(attr("withdraw_lock", withdraw_lock.to_string()));
+        }
+    }
+    if attributes.len() <= 2 {
+        return Err(Invalidate {});
+    }
     STATE.save(deps.storage, &state)?;
-    Ok(Response::new().add_attributes(vec![
-        attr("action", "set_swap_wallet"),
-        attr("from", info.sender),
-        attr("new_swap_wallet", address),
-    ]))
+    Ok(Response::new().add_attributes(attributes))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        // Get owner address and total supply
         QueryMsg::GetInfo {} => to_binary(&query_info(deps)?),
+        QueryMsg::Config {} => to_binary(&query_config(deps)?),
         // Get share from address
         QueryMsg::Balance { address } => to_binary(&query_balance(deps, address)?),
         // Get total cap in vault and anchor
@@ -858,11 +875,23 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
 fn query_info(deps: Deps) -> StdResult<InfoResponse> {
     let state = STATE.load(deps.storage)?;
     Ok(InfoResponse {
-        owner: state.owner.to_string(),
         total_supply: state.total_supply,
         locked_b_luna: state.locked_b_luna,
+    })
+}
+
+fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
+    let state = STATE.load(deps.storage)?;
+    Ok(ConfigResponse {
+        owner: state.owner.to_string(),
         paused: state.paused,
         swap_wallet: state.swap_wallet.to_string(),
+        anchor_liquidation_queue: state.anchor_liquidation_queue.to_string(),
+        collateral_token: state.collateral_token.to_string(),
+        price_oracle: state.price_oracle.to_string(),
+        astroport_router: state.astroport_router.to_string(),
+        lock_period: state.lock_period,
+        withdraw_lock: state.withdraw_lock,
     })
 }
 
@@ -1104,8 +1133,8 @@ mod tests {
         assert_eq!(0, res.messages.len());
 
         // it worked, let's query the state
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetInfo {}).unwrap();
-        let value: InfoResponse = from_binary(&res).unwrap();
+        let res = query(deps.as_ref(), mock_env(), QueryMsg::Config {}).unwrap();
+        let value: ConfigResponse = from_binary(&res).unwrap();
         assert_eq!("owner", value.owner);
     }
 }

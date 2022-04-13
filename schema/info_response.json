@@ -4,23 +4,11 @@
   "type": "object",
   "required": [
     "locked_b_luna",
-    "owner",
-    "paused",
-    "swap_wallet",
     "total_supply"
   ],
   "properties": {
     "locked_b_luna": {
       "$ref": "#/definitions/Uint128"
-    },
-    "owner": {
-      "type": "string"
-    },
-    "paused": {
-      "type": "boolean"
-    },
-    "swap_wallet": {
-      "type": "string"
     },
     "total_supply": {
       "$ref": "#/definitions/Uint128"
