@@ -7,6 +7,12 @@ use serde::{Deserialize, Serialize};
 pub struct InstantiateMsg {
     pub owner: Addr,
     pub swap_wallet: Addr,
+    pub anchor_liquidation_queue: Option<Addr>,
+    pub collateral_token: Option<Addr>,
+    pub price_oracle: Option<Addr>,
+    pub astroport_router: Option<Addr>,
+    pub lock_period: Option<u64>,
+    pub withdraw_lock: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -22,20 +28,18 @@ pub enum ExecuteMsg {
         premium_slot: u8,
     },
     ClaimLiquidation {},
-    TransferOwnership {
-        new_owner: Addr,
-    },
     Unlock {},
     Swap {},
-    Pause {
-        pause: bool,
-    },
     SetPermission {
         address: Addr,
         new_permission: Permission,
     },
-    SetSwapWallet {
-        address: Addr,
+    UpdateConfig {
+        owner: Option<Addr>,
+        paused: Option<bool>,
+        swap_wallet: Option<Addr>,
+        lock_period: Option<u64>,
+        withdraw_lock: Option<u64>,
     },
 }
 
@@ -83,6 +87,7 @@ pub enum ExternalMsg {
 pub enum QueryMsg {
     // GetCount returns the current count as a json-encoded number
     GetInfo {},
+    Config {},
     Balance { address: String },
     TotalCap {},
     Activatable {},
@@ -96,11 +101,21 @@ pub enum QueryMsg {
 // We define a custom struct for each query response
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct InfoResponse {
-    pub owner: String,
     pub total_supply: Uint128,
     pub locked_b_luna: Uint128,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct ConfigResponse {
+    pub owner: String,
     pub paused: bool,
     pub swap_wallet: String,
+    pub anchor_liquidation_queue: String,
+    pub collateral_token: String,
+    pub price_oracle: String,
+    pub astroport_router: String,
+    pub lock_period: u64,
+    pub withdraw_lock: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

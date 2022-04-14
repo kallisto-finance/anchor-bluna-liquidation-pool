@@ -58,14 +58,6 @@ Withdraw all liquidated bLuna from Anchor Liquidation Queue.
 |-----|------|-------------|
 | -   | -    | -           |
 
-### TransferOwnership***
-
-Transfer ownership to another address.
-
-| Key          | Type | Description       |
-|--------------|------|-------------------|
-| new_owner    | Addr | New owner address |
-
 ### Unlock
 
 Unlock locked bLuna.
@@ -82,14 +74,6 @@ Swap unlocked bLuna into UST using astroport.
 |-----|------|-------------|
 | -   | -    | -           |
 
-### Pause
-
-Swap unlocked bLuna into UST using astroport.
-
-| Key   | Type | Description                          |
-|-------|------|--------------------------------------|
-| pause | bool | `true` for pause, `false` for resume |
-
 ### SetPermission
 
 Swap unlocked bLuna into UST using astroport.
@@ -105,11 +89,24 @@ Swap unlocked bLuna into UST using astroport.
 |----------------|------------|------------------------------|
 | submit_bid     | bool       | `true` if able to submit bid |
 
+### UpdateConfig***
+
+Update configuration.
+
+| Key           | Type          | Description                             |
+|---------------|---------------|-----------------------------------------|
+| owner         | Option\<Addr> | New owner address                       |
+| paused        | Option\<bool> | `true` for pause, `false` for resume    |
+| swap_wallet   | Option\<Addr> | New swap wallet address                 |
+| lock_period   | Option\<u64>  | bLuna lock period                       |
+| withdraw_lock | Option\<u64>  | Withdraw lock period after last deposit |
+
+
 ## QueryMsg
 
 ### GetInfo
 
-Get owner address and total supply.
+Get total supply and locked bLuna amount.
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -119,10 +116,30 @@ Get owner address and total supply.
 
 | Key           | Type    | Description                      |
 |---------------|---------|----------------------------------|
-| owner         | String  | Owner address                    |
 | total_supply  | Uint128 | Total supply amount of the vault |
 | locked_b_luna | Uint128 | Locked bLuna amount              |
-| paused        | bool    | `true` if paused                 |
+
+### Config
+
+Get owner address and total supply.
+
+| Key | Type | Description |
+|-----|------|-------------|
+| -   | -    | -           |
+
+#### ConfigResponse
+
+| Key                      | Type   | Description                               |
+|--------------------------|--------|-------------------------------------------|
+| owner                    | String | Owner address                             |
+| paused                   | bool   | `true` if paused                          |
+| swap_wallet              | String | Swap wallet contract address              |
+| anchor_liquidation_queue | String | Anchor Liquidation Queue contract address |
+| collateral_token         | String | Collateral Token (bLuna) address          |
+| price_oracle             | String | Price Oracle contract address             |
+| astroport_router         | String | Astroport Router contract address         |
+| lock_period              | u64    | bLuna lock period                         |
+| withdraw_lock            | u64    | Withdraw lock period after last deposit   |
 
 ### Balance
 

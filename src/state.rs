@@ -11,6 +11,12 @@ pub struct State {
     pub locked_b_luna: Uint128,
     pub swap_wallet: Addr,
     pub paused: bool,
+    pub anchor_liquidation_queue: Addr,
+    pub collateral_token: Addr,
+    pub price_oracle: Addr,
+    pub astroport_router: Addr,
+    pub lock_period: u64,
+    pub withdraw_lock: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -33,15 +39,3 @@ pub const PERMISSIONS: Map<&[u8], Permission> = Map::new("permission");
 pub const STATE: Item<State> = Item::new("state");
 
 pub const CLAIM_LIST: Map<U32Key, TokenRecord> = Map::new("claim_list");
-
-pub const ANCHOR_LIQUIDATION_QUEUE_ADDR: &str = "terra1e25zllgag7j9xsun3me4stnye2pcg66234je3u";
-
-pub const B_LUNA_ADDR: &str = "terra1kc87mu460fwkqte29rquh4hc20m54fxwtsx7gp";
-
-pub const PRICE_ORACLE_ADDR: &str = "terra1cgg6yef7qcdm070qftghfulaxmllgmvk77nc7t";
-
-pub const ASTROPORT_ROUTER: &str = "terra16t7dpwwgx9n3lq6l6te3753lsjqwhxwpday9zx";
-
-pub const LOCK_PERIOD: u64 = 14 * 24 * 60 * 60;
-
-pub const WITHDRAW_LOCK: u64 = 60 * 60;

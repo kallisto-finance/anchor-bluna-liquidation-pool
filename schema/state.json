@@ -3,13 +3,33 @@
   "title": "State",
   "type": "object",
   "required": [
+    "anchor_liquidation_queue",
+    "astroport_router",
+    "collateral_token",
+    "lock_period",
     "locked_b_luna",
     "owner",
     "paused",
+    "price_oracle",
     "swap_wallet",
-    "total_supply"
+    "total_supply",
+    "withdraw_lock"
   ],
   "properties": {
+    "anchor_liquidation_queue": {
+      "$ref": "#/definitions/Addr"
+    },
+    "astroport_router": {
+      "$ref": "#/definitions/Addr"
+    },
+    "collateral_token": {
+      "$ref": "#/definitions/Addr"
+    },
+    "lock_period": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
     "locked_b_luna": {
       "$ref": "#/definitions/Uint128"
     },
@@ -19,11 +39,19 @@
     "paused": {
       "type": "boolean"
     },
+    "price_oracle": {
+      "$ref": "#/definitions/Addr"
+    },
     "swap_wallet": {
       "$ref": "#/definitions/Addr"
     },
     "total_supply": {
       "$ref": "#/definitions/Uint128"
+    },
+    "withdraw_lock": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
     }
   },
   "definitions": {

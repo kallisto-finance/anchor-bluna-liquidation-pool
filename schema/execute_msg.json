@@ -87,26 +87,6 @@
     {
       "type": "object",
       "required": [
-        "transfer_ownership"
-      ],
-      "properties": {
-        "transfer_ownership": {
-          "type": "object",
-          "required": [
-            "new_owner"
-          ],
-          "properties": {
-            "new_owner": {
-              "$ref": "#/definitions/Addr"
-            }
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "required": [
         "unlock"
       ],
       "properties": {
@@ -124,26 +104,6 @@
       "properties": {
         "swap": {
           "type": "object"
-        }
-      },
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "required": [
-        "pause"
-      ],
-      "properties": {
-        "pause": {
-          "type": "object",
-          "required": [
-            "pause"
-          ],
-          "properties": {
-            "pause": {
-              "type": "boolean"
-            }
-          }
         }
       },
       "additionalProperties": false
@@ -175,17 +135,53 @@
     {
       "type": "object",
       "required": [
-        "set_swap_wallet"
+        "update_config"
       ],
       "properties": {
-        "set_swap_wallet": {
+        "update_config": {
           "type": "object",
-          "required": [
-            "address"
-          ],
           "properties": {
-            "address": {
-              "$ref": "#/definitions/Addr"
+            "lock_period": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
+            },
+            "owner": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Addr"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "paused": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "swap_wallet": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/Addr"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "withdraw_lock": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint64",
+              "minimum": 0.0
             }
           }
         }

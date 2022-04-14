@@ -18,15 +18,13 @@ use crate::error::ContractError;
 use crate::msg::AssetInfo::{NativeToken, Token};
 use crate::msg::SwapOperation::{AstroSwap, NativeSwap};
 use crate::msg::{
-    ActivatableResponse, BalanceResponse, BidsResponse, ClaimableResponse, Cw20BalanceResponse,
-    ExecuteMsg, ExternalMsg, ExternalQueryMsg, InfoResponse, InstantiateMsg, PermissionResponse,
-    PriceResponse, QueryMsg, TimestampResponse, TotalCapResponse, UnlockableResponse,
-    WithdrawableLimitResponse,
+    ActivatableResponse, BalanceResponse, BidsResponse, ClaimableResponse, ConfigResponse,
+    Cw20BalanceResponse, ExecuteMsg, ExternalMsg, ExternalQueryMsg, InfoResponse, InstantiateMsg,
+    PermissionResponse, PriceResponse, QueryMsg, TimestampResponse, TotalCapResponse,
+    UnlockableResponse, WithdrawableLimitResponse,
 };
 use crate::state::{
-    Permission, State, TokenRecord, ANCHOR_LIQUIDATION_QUEUE_ADDR, ASTROPORT_ROUTER, BALANCES,
-    B_LUNA_ADDR, CLAIM_LIST, LAST_DEPOSIT, LOCK_PERIOD, PERMISSIONS, PRICE_ORACLE_ADDR, STATE,
-    WITHDRAW_LOCK,
+    Permission, State, TokenRecord, BALANCES, CLAIM_LIST, LAST_DEPOSIT, PERMISSIONS, STATE,
 };
 
 // version info for migration info
@@ -46,6 +44,20 @@ pub fn instantiate(
         locked_b_luna: Uint128::zero(),
         swap_wallet: msg.swap_wallet.clone(),
         paused: false,
+        anchor_liquidation_queue: msg
+            .anchor_liquidation_queue
+            .unwrap_or_else(|| Addr::unchecked("terra1e25zllgag7j9xsun3me4stnye2pcg66234je3u")),
+        collateral_token: msg
+            .collateral_token
+            .unwrap_or_else(|| Addr::unchecked("terra1kc87mu460fwkqte29rquh4hc20m54fxwtsx7gp")),
+        price_oracle: msg
+            .price_oracle
+            .unwrap_or_else(|| Addr::unchecked("terra1cgg6yef7qcdm070qftghfulaxmllgmvk77nc7t")),
+        astroport_router: msg
+            .astroport_router
+            .unwrap_or_else(|| Addr::unchecked("terra16t7dpwwgx9n3lq6l6te3753lsjqwhxwpday9zx")),
+        lock_period: msg.lock_period.unwrap_or(14 * 24 * 60 * 60),
+        withdraw_lock: msg.withdraw_lock.unwrap_or(60 * 60),
     };
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
     STATE.save(deps.storage, &state)?;
@@ -84,18 +96,27 @@ pub fn execute(
         } => submit_bid(deps, env, info, amount, premium_slot),
         // Withdraw all liquidated bLuna from Anchor
         ExecuteMsg::ClaimLiquidation {} => claim_liquidation(deps, env, info),
-        // Transfer ownership to the other address
-        // Owner will be service account address
-        // Only owner can execute
-        ExecuteMsg::TransferOwnership { new_owner } => transfer_ownership(deps, info, new_owner),
         ExecuteMsg::Unlock {} => unlock(deps, env, info),
         ExecuteMsg::Swap {} => swap(deps, env, info),
-        ExecuteMsg::Pause { pause } => pause_resume(deps, info, pause),
         ExecuteMsg::SetPermission {
             address,
             new_permission,
         } => set_permission(deps, info, address, new_permission),
-        ExecuteMsg::SetSwapWallet { address } => set_swap_wallet(deps, info, address),
+        ExecuteMsg::UpdateConfig {
+            owner,
+            paused,
+            swap_wallet,
+            lock_period,
+            withdraw_lock,
+        } => update_config(
+            deps,
+            info,
+            owner,
+            paused,
+            swap_wallet,
+            lock_period,
+            withdraw_lock,
+        ),
     }
 }
 
@@ -127,7 +148,7 @@ fn deposit(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, Contr
         - share;
     // bLuna in vault
     let b_luna_balance_response: Cw20BalanceResponse = deps.querier.query_wasm_smart(
-        B_LUNA_ADDR,
+        state.collateral_token.to_string(),
         &ExternalQueryMsg::Balance {
             address: env.contract.address.to_string(),
         },
@@ -137,9 +158,9 @@ fn deposit(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, Contr
     // Iterate all valid bids
     loop {
         let res: BidsResponse = deps.querier.query_wasm_smart(
-            ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
+            state.anchor_liquidation_queue.to_string(),
             &ExternalQueryMsg::BidsByUser {
-                collateral_token: B_LUNA_ADDR.to_string(),
+                collateral_token: state.collateral_token.to_string(),
                 bidder: env.contract.address.to_string(),
                 start_after,
                 limit: Some(31),
@@ -158,9 +179,9 @@ fn deposit(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, Contr
     }
     // Fetch bLuna price from oracle
     let price_response: PriceResponse = deps.querier.query_wasm_smart(
-        PRICE_ORACLE_ADDR.to_string(),
+        state.price_oracle.to_string(),
         &ExternalQueryMsg::Price {
-            base: B_LUNA_ADDR.to_string(),
+            base: state.collateral_token.to_string(),
             quote: "uusd".to_string(),
         },
     )?;
@@ -210,6 +231,7 @@ fn submit_bid(
         .query_balance(env.contract.address, "uusd")?
         .amount;
     if !amount.is_zero() && usd_balance >= amount {
+        let state = STATE.load(deps.storage)?;
         Ok(Response::new()
             .add_attributes(vec![
                 attr("action", "submit_bid"),
@@ -218,10 +240,10 @@ fn submit_bid(
                 attr("premium_slot", premium_slot.to_string()),
             ])
             .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
-                contract_addr: ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
+                contract_addr: state.anchor_liquidation_queue.to_string(),
                 funds: vec![Coin::new(amount.u128(), "uusd")],
                 msg: to_binary(&ExternalMsg::SubmitBid {
-                    collateral_token: B_LUNA_ADDR.to_string(),
+                    collateral_token: state.collateral_token.to_string(),
                     premium_slot,
                 })?,
             })))
@@ -233,11 +255,12 @@ fn submit_bid(
 fn activate_bid(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, ContractError> {
     let mut start_after: Option<Uint128> = Some(Uint128::zero());
     let mut bids_idx = Vec::new();
+    let state = STATE.load(deps.storage)?;
     loop {
         let res: BidsResponse = deps.querier.query_wasm_smart(
-            ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
+            state.anchor_liquidation_queue.to_string(),
             &ExternalQueryMsg::BidsByUser {
-                collateral_token: B_LUNA_ADDR.to_string(),
+                collateral_token: state.collateral_token.to_string(),
                 bidder: env.contract.address.to_string(),
                 start_after,
                 limit: Some(31),
@@ -260,10 +283,10 @@ fn activate_bid(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, 
     Ok(Response::new()
         .add_attributes(vec![attr("action", "activate"), attr("from", info.sender)])
         .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
+            contract_addr: state.anchor_liquidation_queue.to_string(),
             funds: vec![],
             msg: to_binary(&ExternalMsg::ActivateBids {
-                collateral_token: B_LUNA_ADDR.to_string(),
+                collateral_token: state.collateral_token.to_string(),
                 bids_idx: Some(bids_idx),
             })?,
         })))
@@ -283,8 +306,9 @@ fn withdraw_ust(
         deps.storage,
         deps.api.addr_canonicalize(&msg_sender)?.as_slice(),
     )?;
+    let mut state = STATE.load(deps.storage)?;
     if let Some(timestamp) = last_timestamp {
-        if timestamp.plus_seconds(WITHDRAW_LOCK) >= env.block.time {
+        if timestamp.plus_seconds(state.withdraw_lock) >= env.block.time {
             return Err(Locked {});
         }
     }
@@ -299,7 +323,7 @@ fn withdraw_ust(
         .amount;
     let mut usd_balance = uusd_balance;
     let b_luna_balance_response: Cw20BalanceResponse = deps.querier.query_wasm_smart(
-        B_LUNA_ADDR,
+        state.collateral_token.to_string(),
         &ExternalQueryMsg::Balance {
             address: env.contract.address.to_string(),
         },
@@ -308,9 +332,9 @@ fn withdraw_ust(
     let mut start_after: Option<Uint128> = Some(Uint128::zero());
     loop {
         let res: BidsResponse = deps.querier.query_wasm_smart(
-            ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
+            state.anchor_liquidation_queue.to_string(),
             &ExternalQueryMsg::BidsByUser {
-                collateral_token: B_LUNA_ADDR.to_string(),
+                collateral_token: state.collateral_token.to_string(),
                 bidder: env.contract.address.to_string(),
                 start_after,
                 limit: Some(31),
@@ -326,16 +350,16 @@ fn withdraw_ust(
         start_after = Some(res.bids.last().unwrap().idx);
     }
     let price_response: PriceResponse = deps.querier.query_wasm_smart(
-        PRICE_ORACLE_ADDR.to_string(),
+        state.price_oracle.to_string(),
         &ExternalQueryMsg::Price {
-            base: B_LUNA_ADDR.to_string(),
+            base: state.collateral_token.to_string(),
             quote: "uusd".to_string(),
         },
     )?;
     let price = price_response.rate;
     // Calculate total cap
     let total_cap = Uint128::try_from(Uint256::from(b_luna_balance).mul(price))? + usd_balance;
-    let mut state = STATE.load(deps.storage)?;
+
     // Calculate exact amount from share and total cap
     let withdraw_cap = total_cap * share / state.total_supply;
     state.total_supply -= share;
@@ -363,9 +387,9 @@ fn withdraw_ust(
         start_after = Some(Uint128::zero());
         loop {
             let res: BidsResponse = deps.querier.query_wasm_smart(
-                ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
+                state.anchor_liquidation_queue.to_string(),
                 &ExternalQueryMsg::BidsByUser {
-                    collateral_token: B_LUNA_ADDR.to_string(),
+                    collateral_token: state.collateral_token.to_string(),
                     bidder: env.contract.address.to_string(),
                     start_after,
                     limit: Some(31),
@@ -374,7 +398,7 @@ fn withdraw_ust(
             for item in &res.bids {
                 if item.amount < usd_balance.into() {
                     messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
-                        contract_addr: ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
+                        contract_addr: state.anchor_liquidation_queue.to_string(),
                         msg: to_binary(&ExternalMsg::RetractBid {
                             bid_idx: item.idx,
                             amount: None,
@@ -384,7 +408,7 @@ fn withdraw_ust(
                     usd_balance -= Uint128::try_from(item.amount)?;
                 } else {
                     messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
-                        contract_addr: ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
+                        contract_addr: state.anchor_liquidation_queue.to_string(),
                         msg: to_binary(&ExternalMsg::RetractBid {
                             bid_idx: item.idx,
                             amount: Some(usd_balance.into()),
@@ -417,7 +441,7 @@ fn withdraw_ust(
             let mut unlocked_b_luna = Uint128::zero();
             for key in keys {
                 let claim = CLAIM_LIST.load(deps.storage, U32Key::from(key.clone()))?;
-                if claim.timestamp.plus_seconds(LOCK_PERIOD) <= env.block.time {
+                if claim.timestamp.plus_seconds(state.lock_period) <= env.block.time {
                     unlocked_b_luna += claim.amount;
                     remove_keys.push(U32Key::from(key));
                 } else {
@@ -435,9 +459,9 @@ fn withdraw_ust(
             if !swap_amount.is_zero() {
                 // swap unlock
                 messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: B_LUNA_ADDR.to_string(),
+                    contract_addr: state.collateral_token.to_string(),
                     msg: to_binary(&ExternalMsg::Send {
-                        contract: ASTROPORT_ROUTER.to_string(),
+                        contract: state.astroport_router.to_string(),
                         amount: if swap_amount >= b_luna_withdraw {
                             let amount = b_luna_withdraw;
                             b_luna_withdraw = Uint128::zero();
@@ -450,7 +474,7 @@ fn withdraw_ust(
                             operations: vec![
                                 AstroSwap {
                                     offer_asset_info: Token {
-                                        contract_addr: Addr::unchecked(B_LUNA_ADDR),
+                                        contract_addr: state.collateral_token.clone(),
                                     },
                                     ask_asset_info: NativeToken {
                                         denom: "uluna".to_string(),
@@ -475,9 +499,9 @@ fn withdraw_ust(
                 let mut start_after = Some(Uint128::zero());
                 loop {
                     let res: BidsResponse = deps.querier.query_wasm_smart(
-                        ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
+                        state.anchor_liquidation_queue.to_string(),
                         &ExternalQueryMsg::BidsByUser {
-                            collateral_token: B_LUNA_ADDR.to_string(),
+                            collateral_token: state.collateral_token.to_string(),
                             bidder: env.contract.address.to_string(),
                             start_after,
                             limit: Some(31),
@@ -507,16 +531,16 @@ fn withdraw_ust(
                 )?;
                 state.locked_b_luna += b_luna_balance;
                 messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
+                    contract_addr: state.anchor_liquidation_queue.to_string(),
                     msg: to_binary(&ExternalMsg::ClaimLiquidations {
-                        collateral_token: B_LUNA_ADDR.to_string(),
+                        collateral_token: state.collateral_token.to_string(),
                         bids_idx: None,
                     })?,
                     funds: vec![],
                 }));
                 // swap on wallet
                 messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: B_LUNA_ADDR.to_string(),
+                    contract_addr: state.collateral_token.to_string(),
                     msg: to_binary(&ExternalMsg::Send {
                         contract: state.swap_wallet.to_string(),
                         amount: b_luna_withdraw,
@@ -578,11 +602,12 @@ fn claim_liquidation(
 ) -> Result<Response, ContractError> {
     let mut b_luna_balance = Uint128::zero();
     let mut start_after = Some(Uint128::zero());
+    let mut state = STATE.load(deps.storage)?;
     loop {
         let res: BidsResponse = deps.querier.query_wasm_smart(
-            ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
+            state.anchor_liquidation_queue.to_string(),
             &ExternalQueryMsg::BidsByUser {
-                collateral_token: B_LUNA_ADDR.to_string(),
+                collateral_token: state.collateral_token.to_string(),
                 bidder: env.contract.address.to_string(),
                 start_after,
                 limit: Some(31),
@@ -614,14 +639,13 @@ fn claim_liquidation(
         },
     )?;
 
-    let mut state = STATE.load(deps.storage)?;
     state.locked_b_luna += b_luna_balance;
     STATE.save(deps.storage, &state)?;
     Ok(Response::new()
         .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
+            contract_addr: state.anchor_liquidation_queue.to_string(),
             msg: to_binary(&ExternalMsg::ClaimLiquidations {
-                collateral_token: B_LUNA_ADDR.to_string(),
+                collateral_token: state.collateral_token.to_string(),
                 bids_idx: None,
             })?,
             funds: vec![],
@@ -633,45 +657,14 @@ fn claim_liquidation(
         ]))
 }
 
-pub fn transfer_ownership(
-    deps: DepsMut,
-    info: MessageInfo,
-    new_owner: Addr,
-) -> Result<Response, ContractError> {
-    let mut state = STATE.load(deps.storage)?;
-    if state.owner.to_string().to_lowercase() != info.sender.to_string().to_lowercase() {
-        return Err(Unauthorized {});
-    }
-    PERMISSIONS.remove(
-        deps.storage,
-        deps.api
-            .addr_canonicalize(&state.owner.to_string())?
-            .as_slice(),
-    );
-    PERMISSIONS.save(
-        deps.storage,
-        deps.api
-            .addr_canonicalize(&new_owner.to_string())?
-            .as_slice(),
-        &Permission { submit_bid: true },
-    )?;
-    state.owner = new_owner.clone();
-    STATE.save(deps.storage, &state)?;
-
-    Ok(Response::new().add_attributes(vec![
-        attr("action", "transfer_ownership"),
-        attr("from", info.sender),
-        attr("to", new_owner.to_string()),
-    ]))
-}
-
 fn unlock(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, ContractError> {
     let keys = CLAIM_LIST.keys(deps.storage, None, None, Order::Ascending);
     let mut remove_keys = Vec::new();
     let mut unlocked_b_luna = Uint128::zero();
+    let state = STATE.load(deps.storage)?;
     for key in keys {
         let claim = CLAIM_LIST.load(deps.storage, U32Key::from(key.clone()))?;
-        if claim.timestamp.plus_seconds(LOCK_PERIOD) <= env.block.time {
+        if claim.timestamp.plus_seconds(state.lock_period) <= env.block.time {
             unlocked_b_luna += claim.amount;
             remove_keys.push(U32Key::from(key));
         } else {
@@ -707,7 +700,9 @@ fn set_permission(
     let permission = PERMISSIONS
         .may_load(
             deps.storage,
-            deps.api.addr_canonicalize(&address.to_string())?.as_slice(),
+            deps.api
+                .addr_canonicalize(&address.to_string().to_lowercase())?
+                .as_slice(),
         )?
         .unwrap_or(Permission { submit_bid: false });
     if permission == new_permission {
@@ -716,19 +711,23 @@ fn set_permission(
     if permission == (Permission { submit_bid: false }) {
         PERMISSIONS.remove(
             deps.storage,
-            deps.api.addr_canonicalize(&address.to_string())?.as_slice(),
+            deps.api
+                .addr_canonicalize(&address.to_string().to_lowercase())?
+                .as_slice(),
         );
     } else {
         PERMISSIONS.save(
             deps.storage,
-            deps.api.addr_canonicalize(&address.to_string())?.as_slice(),
+            deps.api
+                .addr_canonicalize(&address.to_string().to_lowercase())?
+                .as_slice(),
             &permission,
         )?;
     }
     Ok(Response::new().add_attributes(vec![
         attr("action", "set_permission"),
         attr("from", info.sender),
-        attr("to", address.to_string()),
+        attr("to", address.to_string().to_lowercase()),
         attr("submit_bid", new_permission.submit_bid.to_string()),
     ]))
 }
@@ -736,7 +735,7 @@ fn set_permission(
 fn swap(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, ContractError> {
     let state = STATE.load(deps.storage)?;
     let b_luna_balance_response: Cw20BalanceResponse = deps.querier.query_wasm_smart(
-        B_LUNA_ADDR,
+        state.collateral_token.to_string(),
         &ExternalQueryMsg::Balance {
             address: env.contract.address.to_string(),
         },
@@ -746,13 +745,13 @@ fn swap(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, Contract
         return Err(Insufficient {});
     }
     let msg = ExternalMsg::Send {
-        contract: ASTROPORT_ROUTER.to_string(),
+        contract: state.astroport_router.to_string(),
         amount: swap_amount,
         msg: to_binary(&ExternalMsg::ExecuteSwapOperations {
             operations: vec![
                 AstroSwap {
                     offer_asset_info: Token {
-                        contract_addr: Addr::unchecked(B_LUNA_ADDR),
+                        contract_addr: state.collateral_token.clone(),
                     },
                     ask_asset_info: NativeToken {
                         denom: "uluna".to_string(),
@@ -770,7 +769,7 @@ fn swap(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, Contract
     };
     Ok(Response::new()
         .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: B_LUNA_ADDR.to_string(),
+            contract_addr: state.collateral_token.to_string(),
             msg: to_binary(&msg)?,
             funds: vec![],
         }))
@@ -781,45 +780,79 @@ fn swap(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, Contract
         ]))
 }
 
-fn pause_resume(deps: DepsMut, info: MessageInfo, pause: bool) -> Result<Response, ContractError> {
-    let mut state = STATE.load(deps.storage)?;
-    if state.owner.to_string().to_lowercase() != info.sender.to_string().to_lowercase() {
-        return Err(Unauthorized {});
-    }
-    if state.paused == pause {
-        return Err(Invalidate {});
-    }
-    state.paused = pause;
-    STATE.save(deps.storage, &state)?;
-    Ok(Response::new().add_attributes(vec![
-        attr("action", if pause { "pause" } else { "resume" }),
-        attr("from", info.sender),
-    ]))
-}
-
-fn set_swap_wallet(
+fn update_config(
     deps: DepsMut,
     info: MessageInfo,
-    address: Addr,
+    owner: Option<Addr>,
+    paused: Option<bool>,
+    swap_wallet: Option<Addr>,
+    lock_period: Option<u64>,
+    withdraw_lock: Option<u64>,
 ) -> Result<Response, ContractError> {
     let mut state = STATE.load(deps.storage)?;
     if state.owner.to_string().to_lowercase() != info.sender.to_string().to_lowercase() {
         return Err(Unauthorized {});
     }
-    state.swap_wallet = address.clone();
+    let mut attributes = vec![attr("action", "update_config"), attr("from", info.sender)];
+    if let Some(owner) = owner {
+        if owner.to_string().to_lowercase() != state.owner {
+            PERMISSIONS.remove(
+                deps.storage,
+                deps.api
+                    .addr_canonicalize(state.owner.to_string().as_str())?
+                    .as_slice(),
+            );
+            PERMISSIONS.save(
+                deps.storage,
+                deps.api
+                    .addr_canonicalize(owner.to_string().to_lowercase().as_str())?
+                    .as_slice(),
+                &Permission { submit_bid: true },
+            )?;
+            state.owner = deps
+                .api
+                .addr_validate(owner.to_string().to_lowercase().as_str())?;
+            attributes.push(attr("owner", state.owner.to_string()));
+        }
+    }
+    if let Some(paused) = paused {
+        if paused != state.paused {
+            state.paused = paused;
+            attributes.push(attr("paused", paused.to_string()));
+        }
+    }
+    if let Some(swap_wallet) = swap_wallet {
+        if swap_wallet.to_string().to_lowercase() != state.swap_wallet {
+            state.swap_wallet = deps
+                .api
+                .addr_validate(swap_wallet.to_string().to_lowercase().as_str())?;
+            attributes.push(attr("swap_wallet", state.swap_wallet.to_string()));
+        }
+    }
+    if let Some(lock_period) = lock_period {
+        if lock_period != state.lock_period {
+            state.lock_period = lock_period;
+            attributes.push(attr("lock_period", lock_period.to_string()));
+        }
+    }
+    if let Some(withdraw_lock) = withdraw_lock {
+        if withdraw_lock != state.withdraw_lock {
+            state.withdraw_lock = withdraw_lock;
+            attributes.push(attr("withdraw_lock", withdraw_lock.to_string()));
+        }
+    }
+    if attributes.len() <= 2 {
+        return Err(Invalidate {});
+    }
     STATE.save(deps.storage, &state)?;
-    Ok(Response::new().add_attributes(vec![
-        attr("action", "set_swap_wallet"),
-        attr("from", info.sender),
-        attr("new_swap_wallet", address),
-    ]))
+    Ok(Response::new().add_attributes(attributes))
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        // Get owner address and total supply
         QueryMsg::GetInfo {} => to_binary(&query_info(deps)?),
+        QueryMsg::Config {} => to_binary(&query_config(deps)?),
         // Get share from address
         QueryMsg::Balance { address } => to_binary(&query_balance(deps, address)?),
         // Get total cap in vault and anchor
@@ -842,11 +875,23 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
 fn query_info(deps: Deps) -> StdResult<InfoResponse> {
     let state = STATE.load(deps.storage)?;
     Ok(InfoResponse {
-        owner: state.owner.to_string(),
         total_supply: state.total_supply,
         locked_b_luna: state.locked_b_luna,
+    })
+}
+
+fn query_config(deps: Deps) -> StdResult<ConfigResponse> {
+    let state = STATE.load(deps.storage)?;
+    Ok(ConfigResponse {
+        owner: state.owner.to_string(),
         paused: state.paused,
         swap_wallet: state.swap_wallet.to_string(),
+        anchor_liquidation_queue: state.anchor_liquidation_queue.to_string(),
+        collateral_token: state.collateral_token.to_string(),
+        price_oracle: state.price_oracle.to_string(),
+        astroport_router: state.astroport_router.to_string(),
+        lock_period: state.lock_period,
+        withdraw_lock: state.withdraw_lock,
     })
 }
 
@@ -863,8 +908,9 @@ fn query_total_cap(deps: Deps, env: Env) -> StdResult<TotalCapResponse> {
         .querier
         .query_balance(&env.contract.address, "uusd")?
         .amount;
+    let state = STATE.load(deps.storage)?;
     let b_luna_balance_response: Cw20BalanceResponse = deps.querier.query_wasm_smart(
-        B_LUNA_ADDR,
+        state.collateral_token.to_string(),
         &ExternalQueryMsg::Balance {
             address: env.contract.address.to_string(),
         },
@@ -873,9 +919,9 @@ fn query_total_cap(deps: Deps, env: Env) -> StdResult<TotalCapResponse> {
     let mut start_after: Option<Uint128> = Some(Uint128::zero());
     loop {
         let res: BidsResponse = deps.querier.query_wasm_smart(
-            ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
+            state.anchor_liquidation_queue.to_string(),
             &ExternalQueryMsg::BidsByUser {
-                collateral_token: B_LUNA_ADDR.to_string(),
+                collateral_token: state.collateral_token.to_string(),
                 bidder: env.contract.address.to_string(),
                 start_after,
                 limit: Some(31),
@@ -891,9 +937,9 @@ fn query_total_cap(deps: Deps, env: Env) -> StdResult<TotalCapResponse> {
         start_after = Some(res.bids.last().unwrap().idx);
     }
     let price_response: PriceResponse = deps.querier.query_wasm_smart(
-        PRICE_ORACLE_ADDR.to_string(),
+        state.price_oracle.to_string(),
         &ExternalQueryMsg::Price {
-            base: B_LUNA_ADDR.to_string(),
+            base: state.collateral_token.to_string(),
             quote: "uusd".to_string(),
         },
     )?;
@@ -904,11 +950,12 @@ fn query_total_cap(deps: Deps, env: Env) -> StdResult<TotalCapResponse> {
 
 fn query_activatable(deps: Deps, env: Env) -> StdResult<ActivatableResponse> {
     let mut start_after: Option<Uint128> = Some(Uint128::zero());
+    let state = STATE.load(deps.storage)?;
     loop {
         let res: BidsResponse = deps.querier.query_wasm_smart(
-            ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
+            state.anchor_liquidation_queue.to_string(),
             &ExternalQueryMsg::BidsByUser {
-                collateral_token: B_LUNA_ADDR.to_string(),
+                collateral_token: state.collateral_token.to_string(),
                 bidder: env.contract.address.to_string(),
                 start_after,
                 limit: Some(31),
@@ -929,11 +976,12 @@ fn query_activatable(deps: Deps, env: Env) -> StdResult<ActivatableResponse> {
 
 fn query_claimable(deps: Deps, env: Env) -> StdResult<ClaimableResponse> {
     let mut start_after: Option<Uint128> = Some(Uint128::zero());
+    let state = STATE.load(deps.storage)?;
     loop {
         let res: BidsResponse = deps.querier.query_wasm_smart(
-            ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
+            state.anchor_liquidation_queue.to_string(),
             &ExternalQueryMsg::BidsByUser {
-                collateral_token: B_LUNA_ADDR.to_string(),
+                collateral_token: state.collateral_token.to_string(),
                 bidder: env.contract.address.to_string(),
                 start_after,
                 limit: Some(31),
@@ -970,8 +1018,9 @@ fn query_withdrawable_limit(
         .querier
         .query_balance(&env.contract.address, "uusd")?
         .amount;
+    let state = STATE.load(deps.storage)?;
     let b_luna_balance_response: Cw20BalanceResponse = deps.querier.query_wasm_smart(
-        B_LUNA_ADDR,
+        state.collateral_token.to_string(),
         &ExternalQueryMsg::Balance {
             address: env.contract.address.to_string(),
         },
@@ -981,9 +1030,9 @@ fn query_withdrawable_limit(
     // Iterate all valid bids
     loop {
         let res: BidsResponse = deps.querier.query_wasm_smart(
-            ANCHOR_LIQUIDATION_QUEUE_ADDR.to_string(),
+            state.anchor_liquidation_queue.to_string(),
             &ExternalQueryMsg::BidsByUser {
-                collateral_token: B_LUNA_ADDR.to_string(),
+                collateral_token: state.collateral_token.to_string(),
                 bidder: env.contract.address.to_string(),
                 start_after,
                 limit: Some(31),
@@ -1007,15 +1056,15 @@ fn query_withdrawable_limit(
     }
     // Fetch bLuna price from oracle
     let price_response: PriceResponse = deps.querier.query_wasm_smart(
-        PRICE_ORACLE_ADDR.to_string(),
+        state.price_oracle.to_string(),
         &ExternalQueryMsg::Price {
-            base: B_LUNA_ADDR.to_string(),
+            base: state.collateral_token.to_string(),
             quote: "uusd".to_string(),
         },
     )?;
     let price = price_response.rate;
     let total_cap = Uint128::try_from(Uint256::from(b_luna_balance).mul(price))? + usd_balance;
-    let state = STATE.load(deps.storage)?;
+
     let withdraw_amount = balance * total_cap / state.total_supply;
     if withdraw_amount <= usd_balance {
         Ok(WithdrawableLimitResponse { limit: balance })
@@ -1036,9 +1085,10 @@ fn query_permission(deps: Deps, address: String) -> StdResult<PermissionResponse
 
 fn query_unlockable(deps: Deps, env: Env) -> StdResult<UnlockableResponse> {
     let mut keys = CLAIM_LIST.keys(deps.storage, None, None, Order::Ascending);
+    let state = STATE.load(deps.storage)?;
     if let Some(key) = keys.next() {
         let claim = CLAIM_LIST.load(deps.storage, U32Key::from(key))?;
-        if claim.timestamp.plus_seconds(LOCK_PERIOD) <= env.block.time {
+        if claim.timestamp.plus_seconds(state.lock_period) <= env.block.time {
             return Ok(UnlockableResponse { unlockable: true });
         }
     }
@@ -1069,6 +1119,12 @@ mod tests {
         let msg = InstantiateMsg {
             owner: Addr::unchecked("owner"),
             swap_wallet: Addr::unchecked("swap_wallet"),
+            anchor_liquidation_queue: None,
+            collateral_token: None,
+            price_oracle: None,
+            astroport_router: None,
+            lock_period: None,
+            withdraw_lock: None,
         };
         let info = mock_info("creator", &coins(1000, "uusd"));
 
@@ -1077,8 +1133,8 @@ mod tests {
         assert_eq!(0, res.messages.len());
 
         // it worked, let's query the state
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetInfo {}).unwrap();
-        let value: InfoResponse = from_binary(&res).unwrap();
+        let res = query(deps.as_ref(), mock_env(), QueryMsg::Config {}).unwrap();
+        let value: ConfigResponse = from_binary(&res).unwrap();
         assert_eq!("owner", value.owner);
     }
 }
