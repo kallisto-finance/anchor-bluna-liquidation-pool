@@ -6,13 +6,14 @@ use crate::ContractError::{
 use cosmwasm_std::entry_point;
 use cosmwasm_std::Order::Ascending;
 use cosmwasm_std::{
-    attr, to_binary, Addr, BankMsg, Binary, Coin, CosmosMsg, Deps, DepsMut, Env, MessageInfo,
-    Order, Response, StdResult, Timestamp, Uint128, Uint256, WasmMsg,
+    attr, to_binary, Addr, BankMsg, Binary, Coin, CosmosMsg, Decimal, Deps, DepsMut, Env,
+    MessageInfo, Order, Response, StdResult, Timestamp, Uint128, Uint256, WasmMsg,
 };
 use cw2::set_contract_version;
 use cw_storage_plus::U32Key;
 use std::convert::{TryFrom, TryInto};
 use std::ops::Mul;
+use std::str::FromStr;
 
 use crate::error::ContractError;
 use crate::msg::AssetInfo::{NativeToken, Token};
@@ -487,7 +488,7 @@ fn withdraw_ust(
                             ],
                             minimum_receive: None,
                             to: Some(msg_sender.clone()),
-                            max_spread: "0.5",
+                            max_spread: Some(Decimal::from_str("0.5")?),
                         })?,
                     })?,
                     funds: vec![],
@@ -764,7 +765,7 @@ fn swap(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, Contract
             ],
             minimum_receive: None,
             to: None,
-            max_spread: "0.5",
+            max_spread: Some(Decimal::from_str("0.5")?),
         })?,
     };
     Ok(Response::new()
