@@ -487,7 +487,7 @@ fn withdraw_ust(
                             ],
                             minimum_receive: None,
                             to: Some(msg_sender.clone()),
-                            max_spread: None,
+                            max_spread: "0.5",
                         })?,
                     })?,
                     funds: vec![],
@@ -764,7 +764,7 @@ fn swap(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, Contract
             ],
             minimum_receive: None,
             to: None,
-            max_spread: None,
+            max_spread: "0.5",
         })?,
     };
     Ok(Response::new()
