@@ -6,7 +6,7 @@ use crate::ContractError::{
 use cosmwasm_std::entry_point;
 use cosmwasm_std::Order::Ascending;
 use cosmwasm_std::{
-    attr, to_binary, Addr, BankMsg, Binary, Coin, CosmosMsg, Decimal, Deps, DepsMut, Env,
+    attr, to_binary, Addr, BankMsg, Binary, Coin, CosmosMsg, Decimal, Deps, DepsMut, Env, Fraction,
     MessageInfo, Order, Response, StdResult, Timestamp, Uint128, Uint256, WasmMsg,
 };
 use cw2::set_contract_version;
@@ -87,6 +87,8 @@ pub fn execute(
         ExecuteMsg::Deposit {} => deposit(deps, env, info),
         // Withdraw UST from vault
         ExecuteMsg::WithdrawUst { share } => withdraw_ust(deps, env, info, share),
+        // Withdraw bLuna from Vault
+        ExecuteMsg::WithdrawBLuna { share } => withdraw_b_luna(deps, env, info, share),
         // Activate all bids
         ExecuteMsg::ActivateBid {} => activate_bid(deps, env, info),
         // Submit bid with amount and premium slot from service
@@ -594,6 +596,102 @@ fn withdraw_ust(
             attr("share", share),
             attr("amount", withdraw_cap),
         ]))
+    }
+}
+
+fn withdraw_b_luna(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    share: Uint128,
+) -> Result<Response, ContractError> {
+    if share.is_zero() {
+        return Err(Invalidate {});
+    }
+    let msg_sender = info.sender.to_string().to_lowercase();
+    let last_timestamp = LAST_DEPOSIT.may_load(
+        deps.storage,
+        deps.api.addr_canonicalize(&msg_sender)?.as_slice(),
+    )?;
+    let mut state = STATE.load(deps.storage)?;
+    if let Some(timestamp) = last_timestamp {
+        if timestamp.plus_seconds(state.withdraw_lock) >= env.block.time {
+            return Err(Locked {});
+        }
+    }
+    BALANCES.update(
+        deps.storage,
+        deps.api.addr_canonicalize(&msg_sender)?.as_slice(),
+        |balance| -> StdResult<_> { Ok(balance.unwrap_or_default().checked_sub(share)?) },
+    )?;
+    let uusd_balance = deps
+        .querier
+        .query_balance(&env.contract.address, "uusd")?
+        .amount;
+    let mut usd_balance = uusd_balance;
+    let b_luna_balance_response: Cw20BalanceResponse = deps.querier.query_wasm_smart(
+        state.collateral_token.to_string(),
+        &ExternalQueryMsg::Balance {
+            address: env.contract.address.to_string(),
+        },
+    )?;
+
+    let mut b_luna_balance = b_luna_balance_response.balance;
+    let mut start_after: Option<Uint128> = Some(Uint128::zero());
+    loop {
+        let res: BidsResponse = deps.querier.query_wasm_smart(
+            state.anchor_liquidation_queue.to_string(),
+            &ExternalQueryMsg::BidsByUser {
+                collateral_token: state.collateral_token.to_string(),
+                bidder: env.contract.address.to_string(),
+                start_after,
+                limit: Some(31),
+            },
+        )?;
+        for item in &res.bids {
+            usd_balance += Uint128::try_from(item.amount)?;
+            b_luna_balance += Uint128::try_from(item.pending_liquidated_collateral)?;
+        }
+        if res.bids.len() < 31 {
+            break;
+        }
+        start_after = Some(res.bids.last().unwrap().idx);
+    }
+    let price_response: PriceResponse = deps.querier.query_wasm_smart(
+        state.price_oracle.to_string(),
+        &ExternalQueryMsg::Price {
+            base: state.collateral_token.to_string(),
+            quote: "uusd".to_string(),
+        },
+    )?;
+    let price = price_response.rate;
+    // Calculate total cap
+    let total_cap =
+        b_luna_balance + Uint128::try_from(Uint256::from(usd_balance).mul(price.inv().unwrap()))?;
+    // Calculate exact amount from share and total cap
+    let withdraw_cap = total_cap * share / state.total_supply;
+
+    state.total_supply -= share;
+    STATE.save(deps.storage, &state)?;
+    // Withdraw if bLuna in vault is enough
+    if b_luna_balance_response.balance - state.locked_b_luna >= withdraw_cap {
+        Ok(Response::new()
+            .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: state.collateral_token.to_string(),
+                msg: to_binary(&ExternalMsg::Transfer {
+                    recipient: info.sender.to_string(),
+                    amount: withdraw_cap,
+                })?,
+                funds: vec![],
+            }))
+            .add_attributes(vec![
+                attr("action", "withdraw"),
+                attr("to", info.sender),
+                attr("share", share),
+                attr("amount", withdraw_cap),
+            ]))
+    } else {
+        Err(Locked {})
     }
 }
 
