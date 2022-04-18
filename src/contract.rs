@@ -365,6 +365,9 @@ fn withdraw_ust(
 
     // Calculate exact amount from share and total cap
     let withdraw_cap = total_cap * share / state.total_supply;
+    if withdraw_cap.is_zero() {
+        return Err(Insufficient {});
+    }
     // Withdraw if UST in vault is enough
     if uusd_balance >= withdraw_cap {
         state.total_supply -= share;
@@ -399,27 +402,29 @@ fn withdraw_ust(
                 },
             )?;
             for item in &res.bids {
-                if item.amount < usd_balance.into() {
-                    messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
-                        contract_addr: state.anchor_liquidation_queue.to_string(),
-                        msg: to_binary(&ExternalMsg::RetractBid {
-                            bid_idx: item.idx,
-                            amount: None,
-                        })?,
-                        funds: vec![],
-                    }));
-                    usd_balance -= Uint128::try_from(item.amount)?;
-                } else {
-                    messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
-                        contract_addr: state.anchor_liquidation_queue.to_string(),
-                        msg: to_binary(&ExternalMsg::RetractBid {
-                            bid_idx: item.idx,
-                            amount: Some(usd_balance.into()),
-                        })?,
-                        funds: vec![],
-                    }));
-                    usd_balance = Uint128::zero();
-                    break;
+                if !item.amount.is_zero() {
+                    if item.amount < usd_balance.into() {
+                        messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
+                            contract_addr: state.anchor_liquidation_queue.to_string(),
+                            msg: to_binary(&ExternalMsg::RetractBid {
+                                bid_idx: item.idx,
+                                amount: None,
+                            })?,
+                            funds: vec![],
+                        }));
+                        usd_balance -= Uint128::try_from(item.amount)?;
+                    } else {
+                        messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
+                            contract_addr: state.anchor_liquidation_queue.to_string(),
+                            msg: to_binary(&ExternalMsg::RetractBid {
+                                bid_idx: item.idx,
+                                amount: Some(usd_balance.into()),
+                            })?,
+                            funds: vec![],
+                        }));
+                        usd_balance = Uint128::zero();
+                        break;
+                    }
                 }
             }
             if usd_balance.is_zero() || res.bids.len() < 31 {
@@ -427,13 +432,15 @@ fn withdraw_ust(
             }
             start_after = Some(res.bids.last().unwrap().idx);
         }
-        messages.push(CosmosMsg::Bank(BankMsg::Send {
-            to_address: msg_sender.clone(),
-            amount: vec![Coin {
-                denom: "uusd".to_string(),
-                amount: withdraw_cap - usd_balance,
-            }],
-        }));
+        if withdraw_cap > usd_balance {
+            messages.push(CosmosMsg::Bank(BankMsg::Send {
+                to_address: msg_sender.clone(),
+                amount: vec![Coin {
+                    denom: "uusd".to_string(),
+                    amount: withdraw_cap - usd_balance,
+                }],
+            }));
+        }
         if !usd_balance.is_zero() {
             let mut b_luna_withdraw = b_luna_balance * share * usd_balance
                 / withdraw_cap
