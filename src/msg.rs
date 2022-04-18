@@ -22,6 +22,9 @@ pub enum ExecuteMsg {
     WithdrawUst {
         share: Uint128,
     },
+    WithdrawBLuna {
+        share: Uint128,
+    },
     ActivateBid {},
     SubmitBid {
         amount: Uint128,
