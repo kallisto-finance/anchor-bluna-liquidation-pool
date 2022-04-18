@@ -362,10 +362,10 @@ fn withdraw_ust(
 
     // Calculate exact amount from share and total cap
     let withdraw_cap = total_cap * share / state.total_supply;
-    state.total_supply -= share;
-    STATE.save(deps.storage, &state)?;
     // Withdraw if UST in vault is enough
     if uusd_balance >= withdraw_cap {
+        state.total_supply -= share;
+        STATE.save(deps.storage, &state)?;
         Ok(Response::new()
             .add_message(CosmosMsg::Bank(BankMsg::Send {
                 to_address: msg_sender,
@@ -585,6 +585,7 @@ fn withdraw_ust(
                 }
             }
         }
+        state.total_supply -= share;
         STATE.save(deps.storage, &state)?;
         Ok(Response::new().add_messages(messages).add_attributes(vec![
             attr("action", "withdraw"),
