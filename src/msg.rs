@@ -95,7 +95,6 @@ pub enum QueryMsg {
     TotalCap {},
     Activatable {},
     Claimable {},
-    WithdrawableLimit { address: String },
     Permission { address: String },
     Unlockable {},
     LastDepositTimestamp { address: String },
@@ -139,11 +138,6 @@ pub struct ActivatableResponse {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct ClaimableResponse {
     pub claimable: bool,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
-pub struct WithdrawableLimitResponse {
-    pub limit: Uint128,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
