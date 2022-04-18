@@ -22,7 +22,7 @@ use crate::msg::{
     ActivatableResponse, BalanceResponse, BidsResponse, ClaimableResponse, ConfigResponse,
     Cw20BalanceResponse, ExecuteMsg, ExternalMsg, ExternalQueryMsg, InfoResponse, InstantiateMsg,
     PermissionResponse, PriceResponse, QueryMsg, TimestampResponse, TotalCapResponse,
-    UnlockableResponse, WithdrawableLimitResponse,
+    UnlockableResponse,
 };
 use crate::state::{
     Permission, State, TokenRecord, BALANCES, CLAIM_LIST, LAST_DEPOSIT, PERMISSIONS, STATE,
@@ -441,113 +441,12 @@ fn withdraw_ust(
                 }],
             }));
         }
+        let mut unlocked_b_luna = Uint128::zero();
         if !usd_balance.is_zero() {
             let mut b_luna_withdraw = b_luna_balance * share * usd_balance
                 / withdraw_cap
                 / (state.total_supply - share * (withdraw_cap - usd_balance) / withdraw_cap);
-            // unlock
-            let keys = CLAIM_LIST.keys(deps.storage, None, None, Order::Ascending);
-            let mut remove_keys = Vec::new();
-            let mut unlocked_b_luna = Uint128::zero();
-            for key in keys {
-                let claim = CLAIM_LIST.load(deps.storage, U32Key::from(key.clone()))?;
-                if claim.timestamp.plus_seconds(state.lock_period) <= env.block.time {
-                    unlocked_b_luna += claim.amount;
-                    remove_keys.push(U32Key::from(key));
-                } else {
-                    break;
-                }
-            }
-            for key in remove_keys {
-                CLAIM_LIST.remove(deps.storage, key);
-            }
-            if !unlocked_b_luna.is_zero() {
-                state.locked_b_luna -= unlocked_b_luna;
-            }
-            // swap on Astroport
-            let swap_amount = b_luna_balance_response.balance - state.locked_b_luna;
-            if !swap_amount.is_zero() {
-                // swap unlock
-                messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: state.collateral_token.to_string(),
-                    msg: to_binary(&ExternalMsg::Send {
-                        contract: state.astroport_router.to_string(),
-                        amount: if swap_amount >= b_luna_withdraw {
-                            let amount = b_luna_withdraw;
-                            b_luna_withdraw = Uint128::zero();
-                            amount
-                        } else {
-                            b_luna_withdraw -= swap_amount;
-                            swap_amount
-                        },
-                        msg: to_binary(&ExternalMsg::ExecuteSwapOperations {
-                            operations: vec![
-                                AstroSwap {
-                                    offer_asset_info: Token {
-                                        contract_addr: state.collateral_token.clone(),
-                                    },
-                                    ask_asset_info: NativeToken {
-                                        denom: "uluna".to_string(),
-                                    },
-                                },
-                                NativeSwap {
-                                    offer_denom: "uluna".to_string(),
-                                    ask_denom: "uusd".to_string(),
-                                },
-                            ],
-                            minimum_receive: None,
-                            to: Some(msg_sender.clone()),
-                            max_spread: Some(Decimal::from_str("0.5")?),
-                        })?,
-                    })?,
-                    funds: vec![],
-                }));
-            }
             if !b_luna_withdraw.is_zero() {
-                // claim liquidation
-                let mut b_luna_balance = Uint128::zero();
-                let mut start_after = Some(Uint128::zero());
-                loop {
-                    let res: BidsResponse = deps.querier.query_wasm_smart(
-                        state.anchor_liquidation_queue.to_string(),
-                        &ExternalQueryMsg::BidsByUser {
-                            collateral_token: state.collateral_token.to_string(),
-                            bidder: env.contract.address.to_string(),
-                            start_after,
-                            limit: Some(31),
-                        },
-                    )?;
-                    for item in &res.bids {
-                        b_luna_balance += Uint128::try_from(item.pending_liquidated_collateral)?;
-                    }
-                    if res.bids.len() < 31 {
-                        break;
-                    }
-                    start_after = Some(res.bids.last().unwrap().idx);
-                }
-                let last_key = CLAIM_LIST.keys(deps.storage, None, None, Ascending).last();
-                let new_key = if let Some(value) = last_key {
-                    u32::from_be_bytes(value.as_slice().try_into().unwrap()) + 1
-                } else {
-                    0
-                };
-                CLAIM_LIST.save(
-                    deps.storage,
-                    U32Key::from(new_key),
-                    &TokenRecord {
-                        amount: b_luna_balance,
-                        timestamp: env.block.time,
-                    },
-                )?;
-                state.locked_b_luna += b_luna_balance;
-                messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
-                    contract_addr: state.anchor_liquidation_queue.to_string(),
-                    msg: to_binary(&ExternalMsg::ClaimLiquidations {
-                        collateral_token: state.collateral_token.to_string(),
-                        bids_idx: None,
-                    })?,
-                    funds: vec![],
-                }));
                 // swap on wallet
                 messages.push(CosmosMsg::Wasm(WasmMsg::Execute {
                     contract_addr: state.collateral_token.to_string(),
@@ -558,51 +457,57 @@ fn withdraw_ust(
                     })?,
                     funds: vec![],
                 }));
-                // unlock again
-                let keys = CLAIM_LIST.keys(deps.storage, None, None, Order::Ascending);
-                let mut remove_keys = Vec::new();
-                let mut unlocked_b_luna = Uint128::zero();
-                let mut last_key = None;
-                let mut new_claim = TokenRecord {
-                    amount: Uint128::zero(),
-                    timestamp: Timestamp::default(),
-                };
-                for key in keys {
-                    let claim = CLAIM_LIST.load(deps.storage, U32Key::from(key.clone()))?;
-                    if b_luna_withdraw >= claim.amount {
-                        b_luna_withdraw -= claim.amount;
-                        unlocked_b_luna += claim.amount;
-                        remove_keys.push(U32Key::from(key));
-                    } else {
-                        unlocked_b_luna += b_luna_withdraw;
-                        new_claim = claim.clone();
-                        new_claim.amount -= b_luna_withdraw;
-                        b_luna_withdraw = Uint128::zero();
-                        last_key = Some(key);
+                // unlock
+                if b_luna_balance_response.balance - state.locked_b_luna < b_luna_withdraw {
+                    b_luna_withdraw -= b_luna_balance_response.balance - state.locked_b_luna;
+                    let keys = CLAIM_LIST.keys(deps.storage, None, None, Order::Ascending);
+                    let mut remove_keys = Vec::new();
+                    let mut last_key = None;
+                    let mut new_claim = TokenRecord {
+                        amount: Uint128::zero(),
+                        timestamp: Timestamp::default(),
+                    };
+                    for key in keys {
+                        let claim = CLAIM_LIST.load(deps.storage, U32Key::from(key.clone()))?;
+                        if b_luna_withdraw >= claim.amount {
+                            b_luna_withdraw -= claim.amount;
+                            unlocked_b_luna += claim.amount;
+                            remove_keys.push(U32Key::from(key));
+                        } else {
+                            unlocked_b_luna += b_luna_withdraw;
+                            new_claim = claim.clone();
+                            new_claim.amount -= b_luna_withdraw;
+                            b_luna_withdraw = Uint128::zero();
+                            last_key = Some(key);
+                        }
+                        if b_luna_withdraw.is_zero() {
+                            break;
+                        }
                     }
-                    if b_luna_withdraw.is_zero() {
-                        break;
+                    for key in remove_keys {
+                        CLAIM_LIST.remove(deps.storage, key);
                     }
-                }
-                for key in remove_keys {
-                    CLAIM_LIST.remove(deps.storage, key);
-                }
-                if let Some(key) = last_key {
-                    CLAIM_LIST.save(deps.storage, U32Key::from(key), &new_claim)?;
-                }
-                if !unlocked_b_luna.is_zero() {
-                    state.locked_b_luna -= unlocked_b_luna;
+                    if let Some(key) = last_key {
+                        CLAIM_LIST.save(deps.storage, U32Key::from(key), &new_claim)?;
+                    }
+                    if !unlocked_b_luna.is_zero() {
+                        state.locked_b_luna -= unlocked_b_luna;
+                    }
                 }
             }
         }
         state.total_supply -= share;
         STATE.save(deps.storage, &state)?;
-        Ok(Response::new().add_messages(messages).add_attributes(vec![
+        let mut attrs = vec![
             attr("action", "withdraw"),
             attr("to", info.sender),
             attr("share", share),
             attr("amount", withdraw_cap),
-        ]))
+        ];
+        if !unlocked_b_luna.is_zero() {
+            attrs.push(attr("unlocked", unlocked_b_luna.to_string()));
+        }
+        Ok(Response::new().add_messages(messages).add_attributes(attrs))
     }
 }
 
@@ -968,9 +873,6 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::Activatable {} => to_binary(&query_activatable(deps, env)?),
         // Return true if liquidate is needed
         QueryMsg::Claimable {} => to_binary(&query_claimable(deps, env)?),
-        QueryMsg::WithdrawableLimit { address } => {
-            to_binary(&query_withdrawable_limit(deps, env, address)?)
-        }
         QueryMsg::Permission { address } => to_binary(&query_permission(deps, address)?),
         QueryMsg::Unlockable {} => to_binary(&query_unlockable(deps, env)?),
         QueryMsg::LastDepositTimestamp { address } => {
@@ -1105,81 +1007,6 @@ fn query_claimable(deps: Deps, env: Env) -> StdResult<ClaimableResponse> {
         start_after = Some(res.bids.last().unwrap().idx);
     }
     Ok(ClaimableResponse { claimable: false })
-}
-
-fn query_withdrawable_limit(
-    deps: Deps,
-    env: Env,
-    address: String,
-) -> StdResult<WithdrawableLimitResponse> {
-    let address = deps.api.addr_canonicalize(&address)?;
-    let balance = BALANCES
-        .may_load(deps.storage, address.as_slice())?
-        .unwrap_or_default();
-    if balance.is_zero() {
-        return Ok(WithdrawableLimitResponse {
-            limit: Uint128::zero(),
-        });
-    }
-    let mut usd_balance = deps
-        .querier
-        .query_balance(&env.contract.address, "uusd")?
-        .amount;
-    let state = STATE.load(deps.storage)?;
-    let b_luna_balance_response: Cw20BalanceResponse = deps.querier.query_wasm_smart(
-        state.collateral_token.to_string(),
-        &ExternalQueryMsg::Balance {
-            address: env.contract.address.to_string(),
-        },
-    )?;
-    let mut b_luna_balance = b_luna_balance_response.balance;
-    let mut start_after: Option<Uint128> = Some(Uint128::zero());
-    // Iterate all valid bids
-    loop {
-        let res: BidsResponse = deps.querier.query_wasm_smart(
-            state.anchor_liquidation_queue.to_string(),
-            &ExternalQueryMsg::BidsByUser {
-                collateral_token: state.collateral_token.to_string(),
-                bidder: env.contract.address.to_string(),
-                start_after,
-                limit: Some(31),
-            },
-        )?;
-        for item in &res.bids {
-            // Waiting UST for liquidation
-            usd_balance += Uint128::try_from(item.amount)?;
-            // Pending bLuna in Anchor
-            b_luna_balance += Uint128::try_from(item.pending_liquidated_collateral)?;
-        }
-        if res.bids.len() < 31 {
-            break;
-        }
-        start_after = Some(res.bids.last().unwrap().idx);
-    }
-    if usd_balance.is_zero() {
-        return Ok(WithdrawableLimitResponse {
-            limit: Uint128::zero(),
-        });
-    }
-    // Fetch bLuna price from oracle
-    let price_response: PriceResponse = deps.querier.query_wasm_smart(
-        state.price_oracle.to_string(),
-        &ExternalQueryMsg::Price {
-            base: state.collateral_token.to_string(),
-            quote: "uusd".to_string(),
-        },
-    )?;
-    let price = price_response.rate;
-    let total_cap = Uint128::try_from(Uint256::from(b_luna_balance).mul(price))? + usd_balance;
-
-    let withdraw_amount = balance * total_cap / state.total_supply;
-    if withdraw_amount <= usd_balance {
-        Ok(WithdrawableLimitResponse { limit: balance })
-    } else {
-        Ok(WithdrawableLimitResponse {
-            limit: usd_balance * state.total_supply / total_cap,
-        })
-    }
 }
 
 fn query_permission(deps: Deps, address: String) -> StdResult<PermissionResponse> {
