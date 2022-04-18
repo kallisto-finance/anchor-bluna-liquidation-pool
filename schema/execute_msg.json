@@ -37,6 +37,26 @@
     {
       "type": "object",
       "required": [
+        "withdraw_b_luna"
+      ],
+      "properties": {
+        "withdraw_b_luna": {
+          "type": "object",
+          "required": [
+            "share"
+          ],
+          "properties": {
+            "share": {
+              "$ref": "#/definitions/Uint128"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
         "activate_bid"
       ],
       "properties": {
