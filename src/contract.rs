@@ -1,6 +1,4 @@
-use crate::ContractError::{
-    DivideByZeroError, Insufficient, Invalidate, Locked, Paused, Unauthorized,
-};
+use crate::error::ContractError::{DivideByZeroError, Insufficient, Invalidate, Locked, Log, Paused, Unauthorized};
 
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
@@ -180,6 +178,7 @@ fn deposit(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, Contr
         }
         start_after = Some(res.bids.last().unwrap().idx);
     }
+    return Err(Log("here".to_string()));
     // Fetch bLuna price from oracle
     let price_response: PriceResponse = deps.querier.query_wasm_smart(
         state.price_oracle.to_string(),
@@ -1038,37 +1037,5 @@ fn query_last_deposit_timestamp(deps: Deps, address: String) -> StdResult<Timest
         Ok(TimestampResponse {
             timestamp: Timestamp::default(),
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-    use cosmwasm_std::{coins, from_binary, Addr};
-
-    #[test]
-    fn proper_initialization() {
-        let mut deps = mock_dependencies(&[]);
-        let msg = InstantiateMsg {
-            owner: Addr::unchecked("owner"),
-            swap_wallet: Addr::unchecked("swap_wallet"),
-            anchor_liquidation_queue: None,
-            collateral_token: None,
-            price_oracle: None,
-            astroport_router: None,
-            lock_period: None,
-            withdraw_lock: None,
-        };
-        let info = mock_info("creator", &coins(1000, "uusd"));
-
-        // we can just call .unwrap() to assert this was a success
-        let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
-        assert_eq!(0, res.messages.len());
-
-        // it worked, let's query the state
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::Config {}).unwrap();
-        let value: ConfigResponse = from_binary(&res).unwrap();
-        assert_eq!("owner", value.owner);
     }
 }
