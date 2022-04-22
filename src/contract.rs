@@ -615,6 +615,7 @@ fn claim_liquidation(
     let mut b_luna_balance = Uint128::zero();
     let mut start_after = Some(Uint128::zero());
     let mut state = STATE.load(deps.storage)?;
+    let mut bids_idx = vec![];
     loop {
         let res: BidsResponse = deps.querier.query_wasm_smart(
             state.anchor_liquidation_queue.to_string(),
@@ -626,7 +627,10 @@ fn claim_liquidation(
             },
         )?;
         for item in &res.bids {
-            b_luna_balance += Uint128::try_from(item.pending_liquidated_collateral)?;
+            if !item.pending_liquidated_collateral.is_zero() {
+                b_luna_balance += Uint128::try_from(item.pending_liquidated_collateral)?;
+                bids_idx.push(item.idx);
+            }
         }
         if res.bids.len() < 31 {
             break;
@@ -658,7 +662,7 @@ fn claim_liquidation(
             contract_addr: state.anchor_liquidation_queue.to_string(),
             msg: to_binary(&ExternalMsg::ClaimLiquidations {
                 collateral_token: state.collateral_token.to_string(),
-                bids_idx: None,
+                bids_idx: Some(bids_idx),
             })?,
             funds: vec![],
         }))
