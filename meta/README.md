@@ -5,7 +5,7 @@ that should not make it into the generated project.
 
 In particular, it is used for an AppVeyor CI script that runs on `cw-template`
 itself (running the cargo-generate script, then testing the generated project).
-The `.circleci` and `.github` directories contain scripts destined for any projects created from
+The `.github` directory contains scripts destined for any projects created from
 this template.
 
 ## Files
