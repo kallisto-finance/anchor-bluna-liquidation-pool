@@ -1,5 +1,3 @@
-# Based on https://github.com/actions-rs/example/blob/master/.github/workflows/quickstart.yml
-
 on: [push, pull_request]
 
 name: Basic
@@ -64,11 +62,11 @@ jobs:
           command: clippy
           args: -- -D warnings
 
-      # TODO: we should check
-      # CHANGES_IN_REPO=$(git status --porcelain)
-      # after this, but I don't know how
       - name: Generate Schema
         uses: actions-rs/cargo@v1
         with:
           command: schema
           args: --locked
+
+      - name: Schema Changes
+        run: git diff --exit-code schema
