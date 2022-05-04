@@ -3,6 +3,7 @@ use crate::ContractError::{
 };
 
 #[cfg(not(feature = "library"))]
+use std::println;
 use cosmwasm_std::entry_point;
 use cosmwasm_std::Order::Ascending;
 use cosmwasm_std::{
@@ -143,6 +144,7 @@ fn deposit(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, Contr
         deps.api.addr_canonicalize(&msg_sender)?.as_slice(),
         &env.block.time,
     )?;
+    println!("{:?}", deps.querier.query_balance(&env.contract.address, "uusd"));
     // UST in vault
     let mut usd_balance = deps
         .querier
@@ -1074,5 +1076,27 @@ mod tests {
         let res = query(deps.as_ref(), mock_env(), QueryMsg::Config {}).unwrap();
         let value: ConfigResponse = from_binary(&res).unwrap();
         assert_eq!("owner", value.owner);
+    }
+
+    #[test]
+    fn matija_testing() {
+        let mut deps = mock_dependencies(&[Coin::new(1000000, "uusd")]);
+        let msg = InstantiateMsg {
+            owner: Addr::unchecked("owner"),
+            swap_wallet: Addr::unchecked("swap_wallet"),
+        };
+        let info_init = mock_info("creator", &coins(1000000, "uusd"));
+        let info_deposit = mock_info("bob", &coins(10000, "uusd"));
+
+        // we can just call .unwrap() to assert this was a success
+        instantiate(deps.as_mut(), mock_env(), info_init, msg).unwrap();
+
+        let res = deposit(deps.as_mut(), mock_env(), info_deposit);
+        
+        // do the assertions here?
+        // check various stores if the things have been updated correctly?
+
+        println!("{:?}", res)
+
     }
 }
