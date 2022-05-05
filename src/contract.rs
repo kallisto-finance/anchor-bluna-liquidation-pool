@@ -1,4 +1,6 @@
-use crate::error::ContractError::{DivideByZeroError, Insufficient, Invalidate, Locked, Log, Paused, Unauthorized};
+use crate::error::ContractError::{
+    DivideByZeroError, Insufficient, Invalidate, Locked, Log, Paused, Unauthorized,
+};
 
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::entry_point;
@@ -178,7 +180,6 @@ fn deposit(deps: DepsMut, env: Env, info: MessageInfo) -> Result<Response, Contr
         }
         start_after = Some(res.bids.last().unwrap().idx);
     }
-    return Err(Log("here".to_string()));
     // Fetch bLuna price from oracle
     let price_response: PriceResponse = deps.querier.query_wasm_smart(
         state.price_oracle.to_string(),
